@@ -157,9 +157,9 @@ def render(
         # Guardar imagen si se proporciona
         if overlay_image_url:
             r = requests.get(overlay_image_url, timeout=60, allow_redirects=True)
-                r.raise_for_status()
-                with open(ipath, "wb") as f:
-                    f.write(r.content)
+            r.raise_for_status()
+            with open(ipath, "wb") as f:
+                f.write(r.content)
         
             # Preprocesar imagen: redondear 8px, escalar dentro de 400x400 y centrar sobre lienzo 400x400
             try:
