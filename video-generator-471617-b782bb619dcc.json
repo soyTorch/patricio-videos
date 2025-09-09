@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "video-generator-471617",
+  "private_key_id": "b782bb619dcc0059a63bfecdce3da3c76b0ae33e",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDEtQR1IMNy9wgS\ni6247H3HNECYhGN/lFxJPHwVs4UMXD/C3JOBY2QdjqzqvPB1RGg6wiVHkbnhIeTs\n2MNMj1dtzHbixzqIcrYzNrqlT4HELgFpqPzEsv/1qDLKS9LlTZf8etc1ZQIx8Evm\nvHz+4iWXOmiyuCOQVBn/0US/059PahIVAgljvqFXoEsZ2EIj2YewCnir5t6msTV0\n3PX3RrRjmGXLs2im5B6D7FULv3A2dRNvroF617nOEXNWPxnwjwD7jGr8S5fR2GaM\n2sUfuSVrZAKomYgQPg2yWnC6zBQZomoXEjL8YUQNPBRvF0hWQh69cjna6WEBqmWo\n67qWPbmjAgMBAAECggEABQWlS+Nx2f+NYmig7AKHSFmAxLDfywp1bx4Im2BuWl07\nxRsIkQ2BwtdsefNbWEMbPiGZMUIt/4RA0GMzj6k6z2ZtXc2kV7nfn1/oVMwg2tD2\nrEUda8NkkYsHyogBDGWpjOkKxL9qPO6O1Lpya1EVKjVAv9jy335y/RSeSR97Oij5\npAbjA339K2/eYvf3FvBrbpjML0V0Ldft/2oZJXlV8QcsVHv22KtYAKL7GIXOWuzC\nAvb1IiM7o8b/Ht06O6Decme3jo2sJ8rMzAvQ7ZeOyDABgDbzXqEEcPBsBekFnlVa\nJphndhscQ7/SRc4e25ScN3PrTgsJzsBAbbieLjvn8QKBgQDqysXlIK7OdCxBO8iF\nphuoowo0tjauFSpf27/ZtSfpSDKggLF3Rd9DI56mORCDUsICTgq5ec0i+YSgjJp8\n4mK5y1X3/X3Xw94gcTmv74Z2iGGFBEhj1Trc0FePPi5lQ9u9LtPPeynLMnkSCMBB\nEbsH9OiDVmm8c6qvexzus11D7QKBgQDWeZWUUpNdKogESuHzIHyTQH8TLDYt+7E1\nia02Rcecig90UQV49nDFtt+f91OaV1HcPFu7116HUIFdLrE8iMWSov+9/DqT8zWb\n50VBhshxmm2jfbEbDbn0TSm30eQyROOr3/U+85LJgdMpr6ihDE4U4GKc0b3n992w\nAHtlTpNhzwKBgEfEMzkWBFiWqfBGlcREQbAKJdR23b/YOFuUj8+7z7c+mjr1G0mZ\n0eRzvsqQJrv9T8/kiuKmmE1Yd3GbiJ0jlYm03VIv6YdKF1tTQI7GaBNTHHvME1Rw\nmM1l4V2nZAcP9tqctaF1xBCYHOmmQx2gjcqg0XFTuH4h3MpGl1FfAeMBAoGAPB+x\ncvcDIKb/olRrqwB8a7s05GcMeS+JqfyCdihxoMyDMJRV+Gb9ji+J2Qo4gZfg9uBk\nxu/FLCHBYiHoxZOB722KS/QdZ8RSTvYyUAA8yLwF6EMgFvluG7JV85X/ZqgxOsl5\nssANcjfWvmTj3OHaMbgFbPjPR+wQVXqNHQU+A7kCgYAoOkvbRYDq8ArTIbqUVxVk\n76eJC6aRY+3d2cwSUS+W4rfkrhvYe4lWVXuJsRsK0JH9w9GvzcJmds3icNJb2/Xp\nSEGMA9ZP17fTVVCSJLeRFuoquiBI8AymbaU4xJLaFMje4Wxd+C3EXmJ+ffN5n/LI\nyCcxSAH8AahE1HkpSYntlg==\n-----END PRIVATE KEY-----\n",
+  "client_email": "patricio@video-generator-471617.iam.gserviceaccount.com",
+  "client_id": "104097534851766544787",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/patricio%40video-generator-471617.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}

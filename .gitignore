@@ -171,4 +171,3 @@ cython_debug/
 # FFmpeg temp files
 ffmpeg_*
 temp_*
-video-generator-471617-b782bb619dcc.json
