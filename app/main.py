@@ -129,9 +129,23 @@ def render(
             )
 
         try:
+            print(f"DEBUG: Executing FFmpeg command: {cmd}")
             run(cmd)
+            print(f"DEBUG: FFmpeg completed successfully")
         except Exception as e:
-            return JSONResponse(status_code=500, content={"error": str(e)})
+            print(f"DEBUG: FFmpeg failed with error: {str(e)}")
+            return JSONResponse(status_code=500, content={"error": f"FFmpeg error: {str(e)}"})
+
+        # Verificar que el archivo se creó
+        if not os.path.exists(out):
+            print(f"DEBUG: Output file does not exist: {out}")
+            return JSONResponse(status_code=500, content={"error": "Video processing failed - output file not created"})
+        
+        file_size = os.path.getsize(out)
+        print(f"DEBUG: Output file created successfully, size: {file_size} bytes")
+        
+        if file_size == 0:
+            return JSONResponse(status_code=500, content={"error": "Video processing failed - output file is empty"})
 
         def iterfile():
             with open(out, "rb") as f:
