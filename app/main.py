@@ -17,23 +17,15 @@ import io
 import glob
 
 API_KEY = os.getenv("API_KEY", "change_me")
-FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+FONT_PATH = "/System/Library/Fonts/Geneva.ttf"
 
 app = FastAPI(title="Video Render API", version="1.0.0")
 
-# Init Google Drive credentials if provided inline in env
+# Init Google Drive credentials if provided inline in env (JSON format only)
 def _init_inline_service_account_from_env():
     try:
         if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
             inline_json = os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON")
-            inline_json_b64 = os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON_B64")
-            if inline_json_b64 and not inline_json:
-                import base64
-                try:
-                    inline_json = base64.b64decode(inline_json_b64).decode("utf-8")
-                except Exception as e:
-                    print(f"DEBUG: Could not decode GDRIVE_SERVICE_ACCOUNT_JSON_B64: {e}")
-                    inline_json = None
             if inline_json:
                 out_path = "/tmp/gdrive_sa.json"
                 with open(out_path, "w") as f:
@@ -84,149 +76,90 @@ def _to_direct_drive_url(url: str) -> str:
     return url
 
 def _download_with_drive_confirm(url: str, out_path: str) -> None:
-    """Mejorada función de descarga para Google Drive con mejor manejo de confirmación"""
+    """Función de descarga que usa exclusivamente la API de Google Drive"""
     url = _to_direct_drive_url(url)
     print(f"DEBUG: Downloading from URL: {url}")
     
-    session = requests.Session()
+    # Usar SOLO la API de Google Drive
+    service = _maybe_get_drive_service()
+    if not service:
+        raise RuntimeError("Google Drive service not available - no credentials found")
     
-    # Headers para simular un navegador
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
+    # Extraer file_id de la URL
+    file_id_match = re.search(r"[?&]id=([A-Za-z0-9_-]+)", url)
+    if not file_id_match:
+        # Intentar formato /file/d/<ID>/
+        file_id_match = re.search(r"/file/d/([A-Za-z0-9_-]+)", url)
+    
+    if not file_id_match:
+        raise RuntimeError("Could not extract file ID from Google Drive URL")
+    
+    file_id_api = file_id_match.group(1)
+    print(f"DEBUG: Using Google Drive API for file ID: {file_id_api}")
     
     try:
-        # Intentar primero con la API oficial si hay credenciales y file_id
-        file_id_match = re.search(r"[?&]id=([A-Za-z0-9_-]+)", url)
-        file_id_api = file_id_match.group(1) if file_id_match else None
-        service = _maybe_get_drive_service()
-        if service and file_id_api:
-            print("DEBUG: Trying Google Drive API download")
-            _download_via_drive_api(service, file_id_api, out_path)
-            print("DEBUG: Google Drive API download completed")
-            if os.path.getsize(out_path) > 0:
-                return
-
-        # Primera petición
-        resp = session.get(url, headers=headers, timeout=90, allow_redirects=True, stream=True)
-        print(f"DEBUG: First response status: {resp.status_code}")
-        print(f"DEBUG: Content-Type: {resp.headers.get('Content-Type', 'N/A')}")
+        _download_via_drive_api(service, file_id_api, out_path)
+        print("DEBUG: Google Drive API download completed")
         
-        # Verificar si es HTML (página de confirmación de Google Drive)
-        content_type = resp.headers.get("Content-Type", "").lower()
-        if "text/html" in content_type:
-            print("DEBUG: Received HTML response, looking for confirmation token")
-            
-            # Leer el contenido HTML
-            html_content = ""
-            for chunk in resp.iter_content(chunk_size=8192, decode_unicode=True):
-                if chunk:
-                    html_content += chunk
-                # Limitar la lectura para evitar descargar todo el HTML
-                if len(html_content) > 100000:  # 100KB debería ser suficiente
-                    break
-            
-            # Buscar token de confirmación y UUID
-            confirm_match = re.search(r'name="confirm"\s+value="([^"]+)"', html_content)
-            uuid_match = re.search(r'name="uuid"\s+value="([^"]+)"', html_content)
-            
-            if confirm_match:
-                confirm_token = confirm_match.group(1)
-                print(f"DEBUG: Found confirm token: {confirm_token}")
-                
-                # Extraer ID del archivo de la URL original
-                file_id_match = re.search(r"[?&]id=([A-Za-z0-9_-]+)", url)
-                if file_id_match:
-                    file_id = file_id_match.group(1)
-                    
-                    # Construir URL con token de confirmación
-                    confirm_url = f"https://drive.google.com/uc?export=download&confirm={confirm_token}&id={file_id}"
-                    if uuid_match:
-                        uuid_token = uuid_match.group(1)
-                        confirm_url += f"&uuid={uuid_token}"
-                    
-                    print(f"DEBUG: Using confirmation URL: {confirm_url}")
-                    
-                    # Segunda petición con confirmación
-                    resp = session.get(confirm_url, headers=headers, timeout=120, allow_redirects=True, stream=True)
-                    print(f"DEBUG: Confirmation response status: {resp.status_code}")
-                    print(f"DEBUG: Confirmation Content-Type: {resp.headers.get('Content-Type', 'N/A')}")
-                else:
-                    print("DEBUG: Could not extract file ID for confirmation")
-            else:
-                print("DEBUG: No confirmation token found in HTML")
-                # Intentar buscar un enlace de descarga directo en el HTML
-                download_link_match = re.search(r'href="(https://drive\.google\.com/uc\?[^"]*export=download[^"]*)"', html_content)
-                if download_link_match:
-                    direct_url = download_link_match.group(1).replace('&amp;', '&')
-                    print(f"DEBUG: Found direct download link: {direct_url}")
-                    resp = session.get(direct_url, headers=headers, timeout=120, allow_redirects=True, stream=True)
-                    print(f"DEBUG: Direct download response status: {resp.status_code}")
+        if not os.path.exists(out_path):
+            raise RuntimeError("Download failed - output file was not created")
         
-        # Verificar que tenemos una respuesta válida
-        resp.raise_for_status()
+        file_size = os.path.getsize(out_path)
+        if file_size == 0:
+            raise RuntimeError("Download failed - output file is empty")
         
-        # Verificar el Content-Type final
-        final_content_type = resp.headers.get("Content-Type", "").lower()
-        print(f"DEBUG: Final Content-Type: {final_content_type}")
+        print(f"DEBUG: Successfully downloaded {file_size} bytes via Drive API")
+        return
         
-        if "text/html" in final_content_type:
-            print("WARNING: Still receiving HTML - download may have failed")
-            # Intentar leer un poco del contenido para verificar
-            peek = next(resp.iter_content(chunk_size=1024), b"")
-            if b"<!DOCTYPE html" in peek or b"<html" in peek:
-                raise RuntimeError("Download failed - received HTML instead of file content")
-        
-        # Descargar el archivo
-        print(f"DEBUG: Starting file download to: {out_path}")
-        total_size = 0
-        
-        with open(out_path, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=1024 * 512):
-                if chunk:
-                    f.write(chunk)
-                    total_size += len(chunk)
-        
-        print(f"DEBUG: Downloaded {total_size} bytes")
-        
-        # Verificar que el archivo se descargó correctamente
-        if total_size == 0:
-            raise RuntimeError("Downloaded file is empty")
-        
-        # Verificar que el archivo existe y tiene contenido
-        if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
-            raise RuntimeError("Download failed - file is empty or doesn't exist")
-            
-        print(f"DEBUG: File downloaded successfully, size: {os.path.getsize(out_path)} bytes")
-        
-    except requests.exceptions.RequestException as e:
-        print(f"DEBUG: Request failed: {str(e)}")
-        raise RuntimeError(f"Failed to download file: {str(e)}")
     except Exception as e:
-        print(f"DEBUG: Unexpected error during download: {str(e)}")
-        raise RuntimeError(f"Download error: {str(e)}")
+        print(f"DEBUG: Google Drive API download failed: {str(e)}")
+        # Limpiar archivo parcial si existe
+        if os.path.exists(out_path):
+            os.remove(out_path)
+        raise RuntimeError(f"Google Drive download failed: {str(e)}")
 
 def _maybe_get_drive_service():
+    """Obtiene el servicio de Google Drive priorizando credenciales JSON"""
     try:
         creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        # Fallback: usar credencial local en el repo (p.ej. video-generator-*.json)
+        
+        # Priorizar credenciales locales en el repo
         if not creds_path or not os.path.exists(creds_path):
-            cwd = os.getcwd()
-            # Intenta nombre explícito primero
-            explicit = os.path.join(cwd, "video-generator-471617-b782bb619dcc.json")
-            candidates = [explicit] + glob.glob(os.path.join(cwd, "video-generator-*-*.json"))
+            # Usar ruta absoluta al directorio del proyecto
+            project_root = "/Users/didac/patricio-videos"
+            # Buscar el archivo específico primero
+            explicit = os.path.join(project_root, "video-generator-471617-b782bb619dcc.json")
+            candidates = [explicit] + glob.glob(os.path.join(project_root, "video-generator-*-*.json"))
+            
             for cand in candidates:
                 if os.path.exists(cand):
                     creds_path = cand
                     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
                     print(f"DEBUG: Using local Drive credentials: {creds_path}")
                     break
+        
         if not creds_path or not os.path.exists(creds_path):
+            print("DEBUG: No Google Drive credentials found")
             return None
+            
+        # Verificar que el archivo de credenciales es válido JSON
+        try:
+            with open(creds_path, 'r') as f:
+                import json
+                cred_data = json.load(f)
+                if cred_data.get('type') != 'service_account':
+                    print("DEBUG: Credentials file is not a service account")
+                    return None
+        except json.JSONDecodeError:
+            print("DEBUG: Credentials file is not valid JSON")
+            return None
+            
         scopes = ["https://www.googleapis.com/auth/drive.readonly"]
         creds = GCredentials.from_service_account_file(creds_path, scopes=scopes)
-        # cache_discovery=False evita escribir en disco en entornos limitados
-        return build("drive", "v3", credentials=creds, cache_discovery=False)
+        service = build("drive", "v3", credentials=creds, cache_discovery=False)
+        print("DEBUG: Google Drive service initialized successfully")
+        return service
+        
     except Exception as e:
         print(f"DEBUG: Could not init Drive service: {e}")
         return None
@@ -399,7 +332,7 @@ def render(
                 print(f"DEBUG: Starting download of image from: {overlay_image_url}")
                 _download_with_drive_confirm(overlay_image_url, ipath)
                 print(f"DEBUG: Image download completed")
-            
+                
                 # Preprocesar imagen: redondear 8px, escalar dentro de 400x400 y centrar sobre lienzo 400x400
                 try:
                     rounded_path = os.path.join(tmp, "overlay_image_rounded.png")

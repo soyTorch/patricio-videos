@@ -24,8 +24,7 @@ COPY app/ ./app/
 
 # (Opcional) Copiar credencial de Google Drive si está presente en el repo
 # y definirla como predeterminada dentro del contenedor
-COPY video-generator-471617-b782bb619dcc.json /app/video-generator-471617-b782bb619dcc.json
-ENV GOOGLE_APPLICATION_CREDENTIALS=/app/video-generator-471617-b782bb619dcc.json
+# Credencial de Drive se inyecta por ENV (GDRIVE_SERVICE_ACCOUNT_JSON / _B64) en runtime
 
 # Crear directorio para archivos temporales
 RUN mkdir -p temp_videos
