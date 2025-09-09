@@ -20,8 +20,12 @@ API REST para procesar videos añadiendo audio y texto superpuesto usando FFmpeg
 # Construir la imagen
 docker build -t video-render-api .
 
-# Ejecutar el contenedor
-docker run -p 8023:8023 -e API_KEY="tu_api_key_secreta" video-render-api
+# Ejecutar el contenedor (con Drive API)
+docker run -p 8023:8023 \
+  -e API_KEY="tu_api_key_secreta" \
+  -e GOOGLE_APPLICATION_CREDENTIALS="/secrets/gdrive-sa.json" \
+  -v /ruta/local/gdrive-sa.json:/secrets/gdrive-sa.json:ro \
+  video-render-api
 ```
 
 ### Instalación local
@@ -63,8 +67,9 @@ curl -X POST "http://localhost:8023/render" \
 
 | Parámetro | Tipo | Requerido | Descripción |
 |-----------|------|-----------|-------------|
-| `video` | File | ✅ | Archivo de video a procesar |
-| `audio` | File | ✅ | Archivo de audio a añadir |
+| `video_url` | String | ✅ | URL de video (HTTP/Drive) |
+| `audio_url` | String | ✅ | URL de audio (HTTP/Drive) |
+| `overlay_image_url` | String | ❌ | URL de imagen de carátula |
 | `overlay_text` | String | ❌ | Texto a superponer (default: "") |
 | `position` | String | ❌ | Posición del texto: `top`, `center`, `bottom` (default: "bottom") |
 | `mix_audio` | String | ❌ | Mezclar con audio original: `true`/`false` (default: "false") |

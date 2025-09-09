@@ -10,11 +10,31 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Header, Resp
 import requests
 import re
 from fastapi.responses import StreamingResponse, JSONResponse
+from google.oauth2.service_account import Credentials as GCredentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
+import io
 
 API_KEY = os.getenv("API_KEY", "change_me")
 FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
 app = FastAPI(title="Video Render API", version="1.0.0")
+
+# Init Google Drive credentials if provided inline in env
+def _init_inline_service_account_from_env():
+    try:
+        if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+            inline_json = os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON")
+            if inline_json:
+                out_path = "/tmp/gdrive_sa.json"
+                with open(out_path, "w") as f:
+                    f.write(inline_json)
+                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = out_path
+                print("DEBUG: Wrote inline service account to /tmp and set GOOGLE_APPLICATION_CREDENTIALS")
+    except Exception as e:
+        print(f"DEBUG: Unable to init inline service account: {e}")
+
+_init_inline_service_account_from_env()
 
 def check_auth(authorization: Optional[str]):
     if not authorization or not authorization.startswith("Bearer "):
@@ -67,6 +87,17 @@ def _download_with_drive_confirm(url: str, out_path: str) -> None:
     }
     
     try:
+        # Intentar primero con la API oficial si hay credenciales y file_id
+        file_id_match = re.search(r"[?&]id=([A-Za-z0-9_-]+)", url)
+        file_id_api = file_id_match.group(1) if file_id_match else None
+        service = _maybe_get_drive_service()
+        if service and file_id_api:
+            print("DEBUG: Trying Google Drive API download")
+            _download_via_drive_api(service, file_id_api, out_path)
+            print("DEBUG: Google Drive API download completed")
+            if os.path.getsize(out_path) > 0:
+                return
+
         # Primera petición
         resp = session.get(url, headers=headers, timeout=90, allow_redirects=True, stream=True)
         print(f"DEBUG: First response status: {resp.status_code}")
@@ -165,6 +196,29 @@ def _download_with_drive_confirm(url: str, out_path: str) -> None:
     except Exception as e:
         print(f"DEBUG: Unexpected error during download: {str(e)}")
         raise RuntimeError(f"Download error: {str(e)}")
+
+def _maybe_get_drive_service():
+    try:
+        creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        if not creds_path or not os.path.exists(creds_path):
+            return None
+        scopes = ["https://www.googleapis.com/auth/drive.readonly"]
+        creds = GCredentials.from_service_account_file(creds_path, scopes=scopes)
+        # cache_discovery=False evita escribir en disco en entornos limitados
+        return build("drive", "v3", credentials=creds, cache_discovery=False)
+    except Exception as e:
+        print(f"DEBUG: Could not init Drive service: {e}")
+        return None
+
+def _download_via_drive_api(service, file_id: str, out_path: str):
+    request = service.files().get_media(fileId=file_id)
+    fh = io.FileIO(out_path, "wb")
+    downloader = MediaIoBaseDownload(fh, request)
+    done = False
+    while not done:
+        status, done = downloader.next_chunk()
+        if status:
+            print(f"DEBUG: Drive API download {int(status.progress() * 100)}%")
 
 def ffprobe_duration(path: str) -> float:
     """Obtener duración del archivo con mejor manejo de errores"""
