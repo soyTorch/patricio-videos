@@ -169,10 +169,10 @@ def render(
             radius = 8
             parts.append(
                 "[2:v]scale=400:400:force_original_aspect_ratio=decrease,format=rgba,"
-                f"geq=a='if((lt(X,{radius})*lt(Y,{radius})*gt(hypot({radius}-X,{radius}-Y),{radius})) + "
+                f"geq=a=if((lt(X,{radius})*lt(Y,{radius})*gt(hypot({radius}-X,{radius}-Y),{radius})) + "
                 f"(lt(W-1-X,{radius})*lt(Y,{radius})*gt(hypot({radius}-(W-1-X),{radius}-Y),{radius})) + "
                 f"(lt(X,{radius})*lt(H-1-Y,{radius})*gt(hypot({radius}-X,{radius}-(H-1-Y)),{radius})) + "
-                f"(lt(W-1-X,{radius})*lt(H-1-Y,{radius})*gt(hypot({radius}-(W-1-X),{radius}-(H-1-Y)),{radius})),0,255)'[img]"
+                f"(lt(W-1-X,{radius})*lt(H-1-Y,{radius})*gt(hypot({radius}-(W-1-X),{radius}-(H-1-Y)),{radius})),0,255)[img]"
             )
 
             # 2) Preparar el video base: si hay escala/pad, aplicarlo; si no, usar 'null'
