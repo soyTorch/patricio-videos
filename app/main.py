@@ -4,6 +4,7 @@ import subprocess
 import shlex
 import random
 from typing import Optional
+from PIL import Image, ImageDraw
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Header, Response
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -141,6 +142,26 @@ def render(
         if overlay_image:
             with open(ipath, "wb") as f:
                 f.write(overlay_image.file.read())
+            # Preprocesar imagen: redondear 8px, escalar dentro de 400x400 y centrar sobre lienzo 400x400
+            try:
+                rounded_path = os.path.join(tmp, "overlay_image_rounded.png")
+                with Image.open(ipath) as im:
+                    im = im.convert("RGBA")
+                    max_w, max_h = 400, 400
+                    im.thumbnail((max_w, max_h))
+                    w, h = im.size
+                    radius = 8
+                    mask = Image.new("L", (w, h), 0)
+                    draw = ImageDraw.Draw(mask)
+                    draw.rounded_rectangle((0, 0, w, h), radius=radius, fill=255)
+                    im.putalpha(mask)
+                    canvas = Image.new("RGBA", (max_w, max_h), (0, 0, 0, 0))
+                    canvas.paste(im, ((max_w - w) // 2, (max_h - h) // 2), im)
+                    canvas.save(rounded_path)
+                ipath = rounded_path
+            except Exception:
+                # Si Pillow falla, continuar con la imagen original
+                pass
 
         # Duración vídeo
         dur = ffprobe_duration(vpath)
@@ -165,8 +186,8 @@ def render(
             # Preparar fragmentos de filtro de forma determinista
             parts = []
 
-            # 1) Escalar imagen y aplicar esquinas redondeadas (8px) vía alpha
-            parts.append("[2:v]scale=400:400:force_original_aspect_ratio=decrease[img]")
+            # 1) La imagen ya está procesada (PNG con alpha). Solo asegurar formato rgba
+            parts.append("[2:v]format=rgba[img]")
 
             # 2) Preparar el video base: si hay escala/pad, aplicarlo; si no, usar 'null'
             scale = build_scale_pad(target)
