@@ -123,20 +123,25 @@ def _maybe_get_drive_service():
     try:
         creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
         
-        # Priorizar credenciales locales en el repo
+        # Priorizar credenciales locales en el repo (solo para desarrollo local)
         if not creds_path or not os.path.exists(creds_path):
-            # Usar ruta absoluta al directorio del proyecto
-            project_root = "/Users/didac/patricio-videos"
-            # Buscar el archivo específico primero
-            explicit = os.path.join(project_root, "video-generator-471617-b782bb619dcc.json")
-            candidates = [explicit] + glob.glob(os.path.join(project_root, "video-generator-*-*.json"))
-            
-            for cand in candidates:
-                if os.path.exists(cand):
-                    creds_path = cand
-                    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
-                    print(f"DEBUG: Using local Drive credentials: {creds_path}")
-                    break
+            # Intentar buscar archivos de credenciales en el directorio actual
+            try:
+                # Buscar archivos de credenciales en el directorio de trabajo actual
+                current_dir = os.getcwd()
+                candidates = glob.glob(os.path.join(current_dir, "video-generator-*-*.json"))
+                # También buscar en el directorio padre (por si estamos en /app)
+                parent_dir = os.path.dirname(current_dir)
+                candidates.extend(glob.glob(os.path.join(parent_dir, "video-generator-*-*.json")))
+                
+                for cand in candidates:
+                    if os.path.exists(cand):
+                        creds_path = cand
+                        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
+                        print(f"DEBUG: Using local Drive credentials: {cand}")
+                        break
+            except Exception as e:
+                print(f"DEBUG: Error searching for local credentials: {e}")
         
         if not creds_path or not os.path.exists(creds_path):
             print("DEBUG: No Google Drive credentials found")
@@ -275,6 +280,157 @@ def build_scale_pad(target: str) -> Optional[str]:
 @app.get("/health")
 def health():
     return {"ok": True}
+
+def _maybe_get_drive_service():
+    """Obtiene el servicio de Google Drive priorizando credenciales JSON"""
+    try:
+        creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        
+        # Priorizar credenciales locales en el repo (solo para desarrollo local)
+        if not creds_path or not os.path.exists(creds_path):
+            # Intentar buscar archivos de credenciales en el directorio actual
+            try:
+                # Buscar archivos de credenciales en el directorio de trabajo actual
+                current_dir = os.getcwd()
+                candidates = glob.glob(os.path.join(current_dir, "video-generator-*-*.json"))
+                # También buscar en el directorio padre (por si estamos en /app)
+                parent_dir = os.path.dirname(current_dir)
+                candidates.extend(glob.glob(os.path.join(parent_dir, "video-generator-*-*.json")))
+                
+                for cand in candidates:
+                    if os.path.exists(cand):
+                        creds_path = cand
+                        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
+                        print(f"DEBUG: Using local Drive credentials: {cand}")
+                        break
+            except Exception as e:
+                print(f"DEBUG: Error searching for local credentials: {e}")
+        
+        if not creds_path or not os.path.exists(creds_path):
+            print("DEBUG: No Google Drive credentials found")
+            return None
+            
+        # Crear credenciales desde el archivo
+        creds = GCredentials.from_service_account_file(
+            creds_path,
+            scopes=['https://www.googleapis.com/auth/drive.readonly']
+        )
+        
+        # Crear el servicio
+        service = build('drive', 'v3', credentials=creds)
+        print(f"DEBUG: Google Drive service created successfully using: {creds_path}")
+        return service
+        
+    except Exception as e:
+        print(f"DEBUG: Error creating Google Drive service: {e}")
+        return None
+
+@app.get("/validate-credentials")
+def validate_credentials(authorization: Optional[str] = Header(None)):
+    """Validar credenciales de Google Drive"""
+    check_auth(authorization)
+    
+    result = {
+        "timestamp": datetime.now().isoformat(),
+        "drive_service": False,
+        "credentials_path": None,
+        "credentials_source": None,
+        "test_access": False,
+        "error": None
+    }
+    
+    try:
+        # Intentar obtener el servicio de Drive
+        service = _maybe_get_drive_service()
+        
+        if service:
+            result["drive_service"] = True
+            
+            # Determinar la fuente de credenciales
+            creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+            inline_json = os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON")
+            
+            if inline_json:
+                result["credentials_source"] = "environment_variable"
+                result["credentials_path"] = "GDRIVE_SERVICE_ACCOUNT_JSON"
+            elif creds_path:
+                result["credentials_source"] = "credentials_file"
+                result["credentials_path"] = creds_path
+            else:
+                # Buscar archivo local en el directorio actual
+                try:
+                    current_dir = os.getcwd()
+                    candidates = glob.glob(os.path.join(current_dir, "video-generator-*-*.json"))
+                    parent_dir = os.path.dirname(current_dir)
+                    candidates.extend(glob.glob(os.path.join(parent_dir, "video-generator-*-*.json")))
+                    
+                    for explicit in candidates:
+                        if os.path.exists(explicit):
+                            result["credentials_source"] = "local_file"
+                            result["credentials_path"] = explicit
+                            break
+                except Exception as e:
+                    print(f"DEBUG: Error searching for credentials in validate: {e}")
+            
+            # Hacer una prueba real de acceso
+            try:
+                # Intentar listar archivos (con límite pequeño para ser eficiente)
+                files_result = service.files().list(pageSize=1, fields="files(id,name)").execute()
+                result["test_access"] = True
+                result["message"] = "Credenciales válidas y acceso a Google Drive confirmado"
+            except Exception as access_error:
+                result["test_access"] = False
+                result["error"] = f"Error de acceso: {str(access_error)}"
+                result["message"] = "Servicio inicializado pero sin acceso a Google Drive"
+        else:
+            result["message"] = "No se pudo inicializar el servicio de Google Drive"
+            result["error"] = "No se encontraron credenciales válidas"
+    
+    except Exception as e:
+        result["error"] = str(e)
+        result["message"] = "Error validando credenciales"
+    
+    return result
+
+@app.get("/test-download")
+def test_download(
+    authorization: Optional[str] = Header(None),
+    file_id: str = "1impzAX_UznRi7_ou4uJZrW_VpCE_PICR"  # Video de prueba por defecto
+):
+    """Probar descarga de un archivo específico de Google Drive"""
+    check_auth(authorization)
+    
+    result = {
+        "timestamp": datetime.now().isoformat(),
+        "file_id": file_id,
+        "download_success": False,
+        "file_size": 0,
+        "error": None
+    }
+    
+    try:
+        import tempfile
+        
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            test_file = os.path.join(tmp_dir, "test_download")
+            drive_url = f"https://drive.google.com/file/d/{file_id}/view"
+            
+            # Intentar descarga
+            _download_with_drive_confirm(drive_url, test_file)
+            
+            if os.path.exists(test_file):
+                file_size = os.path.getsize(test_file)
+                result["download_success"] = True
+                result["file_size"] = file_size
+                result["message"] = f"Descarga exitosa: {file_size} bytes"
+            else:
+                result["message"] = "Archivo no se creó después de la descarga"
+    
+    except Exception as e:
+        result["error"] = str(e)
+        result["message"] = f"Error en descarga: {str(e)}"
+    
+    return result
 
 @app.post("/render")
 def render(

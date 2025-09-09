@@ -171,3 +171,9 @@ cython_debug/
 # FFmpeg temp files
 ffmpeg_*
 temp_*
+
+# Google Cloud credentials (never commit these!)
+video-generator-*.json
+*.json
+!package*.json
+!tsconfig.json
