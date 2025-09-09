@@ -7,12 +7,13 @@ services:
       - "8023:8023"
     environment:
       - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
       - API_KEY=${API_KEY:-change_me}
-      # Opcional: credencial Drive inline (JSON o Base64)
       - GDRIVE_SERVICE_ACCOUNT_JSON=${GDRIVE_SERVICE_ACCOUNT_JSON:-}
-      - GDRIVE_SERVICE_ACCOUNT_JSON_B64=${GDRIVE_SERVICE_ACCOUNT_JSON_B64:-}
+      - GENERIC_TIMEZONE=${TIMEZONE:-Europe/Madrid}
     volumes:
-      - ./:/app
+      # Solo para desarrollo local, quitar en producción
+      - ./temp_videos:/app/temp_videos
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8023/health"]
@@ -20,3 +21,11 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 2G
+          cpus: '1.0'
