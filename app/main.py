@@ -158,31 +158,38 @@ def render(
 
         # Construir comando FFmpeg - versión simplificada pero funcional
         
-        # Con imagen - sintaxis ultra-simple
+        # Con imagen - construir grafo con labels explícitas y sin filtros vacíos
         if overlay_image and ipath:
             inputs_cmd = f'-i "{vpath}" -i "{taac}" -i "{ipath}"'
-            
-            # Un solo filtro complejo que funciona
+
+            # Preparar fragmentos de filtro de forma determinista
+            parts = []
+
+            # 1) Escalar la imagen a un cuadrado razonable manteniendo AR
+            parts.append("[2:v]scale=400:400:force_original_aspect_ratio=decrease[img]")
+
+            # 2) Preparar el video base: si hay escala/pad, aplicarlo; si no, usar 'null'
             scale = build_scale_pad(target)
-            scale_part = scale if scale else ""
-            
-            text_part = ""
+            if scale:
+                parts.append(f"[0:v],{scale}[base]")
+            else:
+                parts.append("[0:v]null[base]")
+
+            # 3) Hacer overlay de la imagen centrada
+            parts.append("[base][img]overlay=(W-w)/2:(H-h)/2[ov]")
+
+            # 4) Añadir texto si corresponde
             if overlay_text:
                 text_filter = build_drawtext_expr(overlay_text, position)
-                text_part = f",{text_filter}"
-            
-            # Filtro completo en una sola línea
-            if scale_part:
-                video_part = f"[0:v],{scale_part}[base]"
+                parts.append(f"[ov],{text_filter}[ov2]")
+                final_in = "[ov2]"
             else:
-                video_part = "[0:v][base]"
-            
-            filter_complex = (
-                f"[2:v]scale=400:400[img];"
-                f"{video_part};"
-                f"[base][img]overlay=(W-w)/2:(H-h)/2{text_part},format=yuv420p[v]"
-            )
-            filter_parts = [filter_complex]
+                final_in = "[ov]"
+
+            # 5) Formato final y label de salida
+            parts.append(f"{final_in},format=yuv420p[v]")
+
+            filter_parts = [';'.join(parts)]
             
         else:
             # Sin imagen - usar la lógica que ya funcionaba
