@@ -21,7 +21,7 @@ API REST para procesar videos añadiendo audio y texto superpuesto usando FFmpeg
 docker build -t video-render-api .
 
 # Ejecutar el contenedor
-docker run -p 8000:8000 -e API_KEY="tu_api_key_secreta" video-render-api
+docker run -p 8023:8023 -e API_KEY="tu_api_key_secreta" video-render-api
 ```
 
 ### Instalación local
@@ -34,7 +34,7 @@ pip install -r requirements.txt
 export API_KEY="tu_api_key_secreta"
 
 # Ejecutar la aplicación
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+uvicorn app.main:app --host 0.0.0.0 --port 8023
 ```
 
 ## Uso
@@ -47,7 +47,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 ### Ejemplo de uso con curl
 
 ```bash
-curl -X POST "http://localhost:8000/render" \
+curl -X POST "http://localhost:8023/render" \
   -H "Authorization: Bearer tu_api_key_secreta" \
   -F "video=@video.mp4" \
   -F "audio=@audio.mp3" \
@@ -103,14 +103,14 @@ Configura la API key usando la variable de entorno `API_KEY`.
 ### Ejecutar en modo desarrollo
 
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn app.main:app --host 0.0.0.0 --port 8023 --reload
 ```
 
 ### Documentación interactiva
 
 Una vez ejecutando, visita:
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
+- Swagger UI: http://localhost:8023/docs
+- ReDoc: http://localhost:8023/redoc
 
 ## Requisitos del sistema
 

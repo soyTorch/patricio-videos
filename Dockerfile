@@ -27,12 +27,12 @@ RUN mkdir -p temp_videos
 
 # Variables de entorno
 ENV HOST=0.0.0.0 
-ENV PORT=8000 
+ENV PORT=8023 
 ENV API_KEY=change_me 
 ENV GENERIC_TIMEZONE=Europe/Madrid
 
 # Exponer puerto
-EXPOSE 8000
+EXPOSE 8023
 
 # Comando para ejecutar la aplicación
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8023"]
