@@ -38,12 +38,15 @@ def build_drawtext_expr(text: str, position: str) -> str:
     # Escapar ':' y '\' y "'" para drawtext
     safe = text.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
     if position == "top":
-        xy = "(w-text_w)/2:60"
+        x_pos = "(w-text_w)/2"
+        y_pos = "60"
     elif position == "center":
-        xy = "(w-text_w)/2:(h-text_h)/2"
-    else:
-        xy = "(w-text_w)/2:h-text_h-60"
-    return f"drawtext=fontfile={FONT_PATH}:text='{safe}':fontsize=48:fontcolor=white:box=1:boxcolor=black@0.45:boxborderw=10:x={xy}"
+        x_pos = "(w-text_w)/2"
+        y_pos = "(h-text_h)/2"
+    else:  # bottom
+        x_pos = "(w-text_w)/2"
+        y_pos = "h-text_h-60"
+    return f"drawtext=fontfile={FONT_PATH}:text='{safe}':fontsize=48:fontcolor=white:box=1:boxcolor=black@0.45:boxborderw=10:x={x_pos}:y={y_pos}"
 
 def build_scale_pad(target: str) -> Optional[str]:
     if target in (None, "", "original"):
