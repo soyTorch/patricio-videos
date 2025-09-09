@@ -22,6 +22,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copiar código de la aplicación
 COPY app/ ./app/
 
+# (Opcional) Copiar credencial de Google Drive si está presente en el repo
+# y definirla como predeterminada dentro del contenedor
+COPY video-generator-471617-b782bb619dcc.json /app/video-generator-471617-b782bb619dcc.json
+ENV GOOGLE_APPLICATION_CREDENTIALS=/app/video-generator-471617-b782bb619dcc.json
+
 # Crear directorio para archivos temporales
 RUN mkdir -p temp_videos
 
