@@ -64,7 +64,7 @@ def build_drawtext_expr(text: str, position: str) -> str:
     else:  # bottom
         x_pos = "(w-text_w)/2"
         y_pos = "h-text_h-200"  # Más arriba que antes
-    return f",drawtext=fontfile={FONT_PATH}:text='{safe}':fontsize=48:fontcolor=white:box=1:boxcolor=black@0.45:boxborderw=10:x={x_pos}:y={y_pos}"
+    return f"drawtext=fontfile={FONT_PATH}:text='{safe}':fontsize=48:fontcolor=white:box=1:boxcolor=black@0.45:boxborderw=10:x={x_pos}:y={y_pos}"
 
 def build_image_overlay_filter(image_path: str) -> str:
     """Construye el filtro para superponer una imagen con bordes redondeados en el centro"""
@@ -193,7 +193,7 @@ def render(
             # 5. Añadir texto si se proporciona
             if overlay_text:
                 text_filter = build_drawtext_expr(overlay_text, position)
-                filter_parts.append(f"{current_video}{text_filter}[v4]")
+                filter_parts.append(f"{current_video},{text_filter}[v4]")
                 current_video = "[v4]"
             
             # 6. Formato final
