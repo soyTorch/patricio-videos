@@ -164,7 +164,7 @@ def render(
             
             # Un solo filtro complejo que funciona
             scale = build_scale_pad(target)
-            scale_part = f",{scale}" if scale else ""
+            scale_part = scale if scale else ""
             
             text_part = ""
             if overlay_text:
@@ -172,9 +172,14 @@ def render(
                 text_part = f",{text_filter}"
             
             # Filtro completo en una sola línea
+            if scale_part:
+                video_part = f"[0:v],{scale_part}[base]"
+            else:
+                video_part = "[0:v][base]"
+            
             filter_complex = (
                 f"[2:v]scale=400:400[img];"
-                f"[0:v]{scale_part}[base];"
+                f"{video_part};"
                 f"[base][img]overlay=(W-w)/2:(H-h)/2{text_part},format=yuv420p[v]"
             )
             filter_parts = [filter_complex]
