@@ -14,6 +14,7 @@ from google.oauth2.service_account import Credentials as GCredentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 import io
+import glob
 
 API_KEY = os.getenv("API_KEY", "change_me")
 FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
@@ -25,6 +26,14 @@ def _init_inline_service_account_from_env():
     try:
         if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
             inline_json = os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON")
+            inline_json_b64 = os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON_B64")
+            if inline_json_b64 and not inline_json:
+                import base64
+                try:
+                    inline_json = base64.b64decode(inline_json_b64).decode("utf-8")
+                except Exception as e:
+                    print(f"DEBUG: Could not decode GDRIVE_SERVICE_ACCOUNT_JSON_B64: {e}")
+                    inline_json = None
             if inline_json:
                 out_path = "/tmp/gdrive_sa.json"
                 with open(out_path, "w") as f:
@@ -200,6 +209,18 @@ def _download_with_drive_confirm(url: str, out_path: str) -> None:
 def _maybe_get_drive_service():
     try:
         creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        # Fallback: usar credencial local en el repo (p.ej. video-generator-*.json)
+        if not creds_path or not os.path.exists(creds_path):
+            cwd = os.getcwd()
+            # Intenta nombre explícito primero
+            explicit = os.path.join(cwd, "video-generator-471617-b782bb619dcc.json")
+            candidates = [explicit] + glob.glob(os.path.join(cwd, "video-generator-*-*.json"))
+            for cand in candidates:
+                if os.path.exists(cand):
+                    creds_path = cand
+                    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
+                    print(f"DEBUG: Using local Drive credentials: {creds_path}")
+                    break
         if not creds_path or not os.path.exists(creds_path):
             return None
         scopes = ["https://www.googleapis.com/auth/drive.readonly"]
