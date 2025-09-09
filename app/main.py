@@ -152,40 +152,75 @@ def render(
         cmd_trim = f'ffmpeg -y -ss {audio_start:.3f} -i "{apath}" -t {dur_s} -ac 2 -ar 48000 -c:a aac "{taac}"'
         run(cmd_trim)
 
-        # Versión simplificada - empezar con funcionalidad básica y añadir características gradualmente
-        # Por ahora, mantener la funcionalidad original pero con las mejoras de audio aleatorio y texto posicionado
+        # Construir comando FFmpeg - versión simplificada pero funcional
         
-        # Filtros de vídeo básicos
-        vf_parts = []
-        scale = build_scale_pad(target)
-        if scale:
-            vf_parts.append(scale)
-        vf_parts.append("format=yuv420p")
+        # Preparar inputs
+        if overlay_image and ipath:
+            # Con imagen
+            inputs_cmd = f'-i "{vpath}" -i "{taac}" -i "{ipath}"'
+            
+            # Filtro complejo con imagen superpuesta y capa oscura
+            filter_parts = []
+            
+            # Procesar imagen
+            filter_parts.append("[2:v]scale=400:400:force_original_aspect_ratio=decrease[img]")
+            
+            # Video base con escala
+            vf_base = "[0:v]"
+            scale = build_scale_pad(target)
+            if scale:
+                vf_base += f",{scale}"
+            
+            # Añadir capa oscura si se solicita
+            if str(dark_overlay).lower() == "true":
+                filter_parts.append(f"color=black@{dark_overlay_opacity}:1080x1920[overlay]")
+                vf_base += ",[0:v][overlay]overlay"
+            
+            # Superponer imagen en el centro
+            vf_base += ",[0:v][img]overlay=(W-w)/2:(H-h)/2"
+            
+            # Añadir texto
+            if overlay_text:
+                text_filter = build_drawtext_expr(overlay_text, position).replace("drawtext=", "")
+                vf_base += f",{text_filter}"
+            
+            vf_base += ",format=yuv420p[v]"
+            filter_parts.append(vf_base)
+            
+        else:
+            # Sin imagen - funcionalidad original mejorada
+            inputs_cmd = f'-i "{vpath}" -i "{taac}"'
+            
+            vf_parts = []
+            scale = build_scale_pad(target)
+            if scale:
+                vf_parts.append(scale)
+            
+            # Capa oscura si se solicita
+            if str(dark_overlay).lower() == "true":
+                vf_parts.append(f"color=black@{dark_overlay_opacity}:1080x1920[overlay];[0:v][overlay]overlay")
+            
+            if overlay_text:
+                vf_parts.append(build_drawtext_expr(overlay_text, position))
+            
+            vf_parts.append("format=yuv420p")
+            filter_parts = [f"[0:v]{','.join(vf_parts)}[v]"]
         
-        # Añadir texto si se proporciona
-        if overlay_text:
-            vf_parts.append(build_drawtext_expr(overlay_text, position))
-        
-        vf = ",".join(vf_parts)
-
-        # Audio: reemplazar o mezclar
+        # Audio
         mix = (str(mix_audio).lower() == "true")
         if mix:
-            # Mezcla audio original del vídeo + música recortada
-            filter_complex = f'[0:a]volume=1.0[a0];[1:a]volume=0.35[a1];[a0][a1]amix=inputs=2:duration=shortest[aout];[0:v]{vf}[v]'
-            cmd = (
-                f'ffmpeg -y -i "{vpath}" -i "{taac}" -filter_complex "{filter_complex}" '
-                f'-map "[v]" -map "[aout]" -c:v libx264 -preset veryfast -crf {crf} '
-                f'-c:a aac -b:a 192k -shortest "{out}"'
-            )
+            filter_parts.append("[0:a]volume=1.0[a0];[1:a]volume=0.35[a1];[a0][a1]amix=inputs=2:duration=shortest[aout]")
+            audio_map = "[aout]"
         else:
-            # Reemplazo puro
-            cmd = (
-                f'ffmpeg -y -i "{vpath}" -i "{taac}" '
-                f'-filter_complex "[0:v]{vf}[v]" -map "[v]" -map 1:a:0 '
-                f'-c:v libx264 -preset veryfast -crf {crf} -c:a aac -b:a 192k '
-                f'-shortest "{out}"'
-            )
+            audio_map = "1:a:0"
+        
+        # Comando final
+        filter_complex = ";".join(filter_parts)
+        cmd = (
+            f'ffmpeg -y {inputs_cmd} -filter_complex "{filter_complex}" '
+            f'-map "[v]" -map {audio_map} -c:v libx264 -preset veryfast -crf {crf} '
+            f'-c:a aac -b:a 192k -shortest "{out}"'
+        )
 
         try:
             print(f"DEBUG: Executing FFmpeg command: {cmd}")
