@@ -171,7 +171,8 @@ def render(
             # 2) Preparar el video base: si hay escala/pad, aplicarlo; si no, usar 'null'
             scale = build_scale_pad(target)
             if scale:
-                parts.append(f"[0:v],{scale}[base]")
+                # Aplica filtros directamente sin coma entre la etiqueta y el filtro
+                parts.append(f"[0:v]{scale}[base]")
             else:
                 parts.append("[0:v]null[base]")
 
@@ -181,7 +182,8 @@ def render(
             # 4) Añadir texto si corresponde
             if overlay_text:
                 text_filter = build_drawtext_expr(overlay_text, position)
-                parts.append(f"[ov],{text_filter}[ov2]")
+                # Encadena drawtext correctamente sobre la etiqueta previa
+                parts.append(f"[ov]{text_filter}[ov2]")
                 final_in = "[ov2]"
             else:
                 final_in = "[ov]"
