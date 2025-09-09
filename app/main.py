@@ -158,35 +158,32 @@ def render(
 
         # Construir comando FFmpeg - versión simplificada pero funcional
         
-        # Versión ultra-simplificada que funciona
+        # Con imagen - sintaxis correcta de FFmpeg
         if overlay_image and ipath:
-            # Con imagen - usar overlay simple
             inputs_cmd = f'-i "{vpath}" -i "{taac}" -i "{ipath}"'
             
-            # Construir filtro paso a paso de manera simple
-            filters = []
+            # Construir filtros por separado
+            filter_parts = []
             
-            # Escalar imagen
-            filters.append("[2:v]scale=400:400:force_original_aspect_ratio=decrease[img]")
+            # 1. Procesar imagen
+            filter_parts.append("[2:v]scale=400:400:force_original_aspect_ratio=decrease[img]")
             
-            # Video base
-            video_filter = "[0:v]"
+            # 2. Procesar video base
+            video_base = "[0:v]"
             scale = build_scale_pad(target)
             if scale:
-                video_filter += f",{scale}"
+                video_base += f",{scale}[v1]"
+            else:
+                video_base += "[v1]"
+            filter_parts.append(video_base)
             
-            # Superponer imagen
-            video_filter += "[base];[base][img]overlay=(W-w)/2:(H-h)/2"
-            
-            # Añadir texto si se proporciona
+            # 3. Superponer imagen
+            overlay_step = "[v1][img]overlay=(W-w)/2:(H-h)/2"
             if overlay_text:
                 text_filter = build_drawtext_expr(overlay_text, position)
-                video_filter += f",{text_filter}"
-            
-            video_filter += ",format=yuv420p[v]"
-            filters.append(video_filter)
-            
-            filter_parts = filters
+                overlay_step += f",{text_filter}"
+            overlay_step += ",format=yuv420p[v]"
+            filter_parts.append(overlay_step)
             
         else:
             # Sin imagen - usar la lógica que ya funcionaba
