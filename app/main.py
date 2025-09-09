@@ -8,6 +8,7 @@ from PIL import Image, ImageDraw
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Header, Response
 import requests
+import re
 from fastapi.responses import StreamingResponse, JSONResponse
 
 API_KEY = os.getenv("API_KEY", "change_me")
@@ -29,6 +30,40 @@ def run(cmd: str):
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.decode("utf-8", "ignore"))
     return proc.stdout.decode("utf-8", "ignore")
+
+def _to_direct_drive_url(url: str) -> str:
+    if "drive.google.com" not in url:
+        return url
+    # Convert /file/d/<ID>/... to uc?export=download&id=<ID>
+    m = re.search(r"/file/d/([A-Za-z0-9_-]+)/", url)
+    if m:
+        file_id = m.group(1)
+        return f"https://drive.google.com/uc?export=download&id={file_id}"
+    return url
+
+def _download_with_drive_confirm(url: str, out_path: str) -> None:
+    url = _to_direct_drive_url(url)
+    session = requests.Session()
+    resp = session.get(url, timeout=90, allow_redirects=True, stream=True)
+    content_type = resp.headers.get("Content-Type", "").lower()
+    if "text/html" in content_type:
+        # Try to extract confirm token from HTML for large files
+        try:
+            html = resp.text
+            token_match = re.search(r"confirm=([0-9A-Za-z_]+)", html)
+            id_match = re.search(r"id=([0-9A-Za-z_-]+)", url)
+            if token_match and id_match:
+                token = token_match.group(1)
+                file_id = id_match.group(1)
+                url = f"https://drive.google.com/uc?export=download&confirm={token}&id={file_id}"
+                resp = session.get(url, timeout=90, allow_redirects=True, stream=True)
+        except Exception:
+            pass
+    resp.raise_for_status()
+    with open(out_path, "wb") as f:
+        for chunk in resp.iter_content(chunk_size=1024 * 512):
+            if chunk:
+                f.write(chunk)
 
 def ffprobe_duration(path: str) -> float:
     out = run(f'ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "{path}"')
@@ -143,23 +178,13 @@ def render(
         out   = os.path.join(tmp, "out_final.mp4")
 
         # Guardar binarios
-        # Descargar video/audio desde URL
-        r = requests.get(video_url, timeout=60, allow_redirects=True)
-        r.raise_for_status()
-        with open(vpath, "wb") as f:
-            f.write(r.content)
-
-        r = requests.get(audio_url, timeout=60, allow_redirects=True)
-        r.raise_for_status()
-        with open(apath, "wb") as f:
-            f.write(r.content)
+        # Descargar video/audio desde URL (robusto para Google Drive)
+        _download_with_drive_confirm(video_url, vpath)
+        _download_with_drive_confirm(audio_url, apath)
         
         # Guardar imagen si se proporciona
         if overlay_image_url:
-            r = requests.get(overlay_image_url, timeout=60, allow_redirects=True)
-            r.raise_for_status()
-            with open(ipath, "wb") as f:
-                f.write(r.content)
+            _download_with_drive_confirm(overlay_image_url, ipath)
         
             # Preprocesar imagen: redondear 8px, escalar dentro de 400x400 y centrar sobre lienzo 400x400
             try:
