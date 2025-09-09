@@ -34,43 +34,175 @@ def run(cmd: str):
 def _to_direct_drive_url(url: str) -> str:
     if "drive.google.com" not in url:
         return url
-    # Convert /file/d/<ID>/... to uc?export=download&id=<ID>
-    m = re.search(r"/file/d/([A-Za-z0-9_-]+)/", url)
+    
+    # Extraer ID del archivo de diferentes formatos de URL de Google Drive
+    file_id = None
+    
+    # Formato: /file/d/<ID>/view o /file/d/<ID>/
+    m = re.search(r"/file/d/([A-Za-z0-9_-]+)", url)
     if m:
         file_id = m.group(1)
+    
+    # Formato: id=<ID>
+    if not file_id:
+        m = re.search(r"[?&]id=([A-Za-z0-9_-]+)", url)
+        if m:
+            file_id = m.group(1)
+    
+    if file_id:
         return f"https://drive.google.com/uc?export=download&id={file_id}"
+    
     return url
 
 def _download_with_drive_confirm(url: str, out_path: str) -> None:
+    """Mejorada función de descarga para Google Drive con mejor manejo de confirmación"""
     url = _to_direct_drive_url(url)
+    print(f"DEBUG: Downloading from URL: {url}")
+    
     session = requests.Session()
-    resp = session.get(url, timeout=90, allow_redirects=True, stream=True)
-    content_type = resp.headers.get("Content-Type", "").lower()
-    if "text/html" in content_type:
-        # Try to extract confirm token from HTML for large files
-        try:
-            html = resp.text
-            token_match = re.search(r"confirm=([0-9A-Za-z_]+)", html)
-            id_match = re.search(r"id=([0-9A-Za-z_-]+)", url)
-            if token_match and id_match:
-                token = token_match.group(1)
-                file_id = id_match.group(1)
-                url = f"https://drive.google.com/uc?export=download&confirm={token}&id={file_id}"
-                resp = session.get(url, timeout=90, allow_redirects=True, stream=True)
-        except Exception:
-            pass
-    resp.raise_for_status()
-    with open(out_path, "wb") as f:
-        for chunk in resp.iter_content(chunk_size=1024 * 512):
-            if chunk:
-                f.write(chunk)
+    
+    # Headers para simular un navegador
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    
+    try:
+        # Primera petición
+        resp = session.get(url, headers=headers, timeout=90, allow_redirects=True, stream=True)
+        print(f"DEBUG: First response status: {resp.status_code}")
+        print(f"DEBUG: Content-Type: {resp.headers.get('Content-Type', 'N/A')}")
+        
+        # Verificar si es HTML (página de confirmación de Google Drive)
+        content_type = resp.headers.get("Content-Type", "").lower()
+        if "text/html" in content_type:
+            print("DEBUG: Received HTML response, looking for confirmation token")
+            
+            # Leer el contenido HTML
+            html_content = ""
+            for chunk in resp.iter_content(chunk_size=8192, decode_unicode=True):
+                if chunk:
+                    html_content += chunk
+                # Limitar la lectura para evitar descargar todo el HTML
+                if len(html_content) > 100000:  # 100KB debería ser suficiente
+                    break
+            
+            # Buscar token de confirmación y UUID
+            confirm_match = re.search(r'name="confirm"\s+value="([^"]+)"', html_content)
+            uuid_match = re.search(r'name="uuid"\s+value="([^"]+)"', html_content)
+            
+            if confirm_match:
+                confirm_token = confirm_match.group(1)
+                print(f"DEBUG: Found confirm token: {confirm_token}")
+                
+                # Extraer ID del archivo de la URL original
+                file_id_match = re.search(r"[?&]id=([A-Za-z0-9_-]+)", url)
+                if file_id_match:
+                    file_id = file_id_match.group(1)
+                    
+                    # Construir URL con token de confirmación
+                    confirm_url = f"https://drive.google.com/uc?export=download&confirm={confirm_token}&id={file_id}"
+                    if uuid_match:
+                        uuid_token = uuid_match.group(1)
+                        confirm_url += f"&uuid={uuid_token}"
+                    
+                    print(f"DEBUG: Using confirmation URL: {confirm_url}")
+                    
+                    # Segunda petición con confirmación
+                    resp = session.get(confirm_url, headers=headers, timeout=120, allow_redirects=True, stream=True)
+                    print(f"DEBUG: Confirmation response status: {resp.status_code}")
+                    print(f"DEBUG: Confirmation Content-Type: {resp.headers.get('Content-Type', 'N/A')}")
+                else:
+                    print("DEBUG: Could not extract file ID for confirmation")
+            else:
+                print("DEBUG: No confirmation token found in HTML")
+                # Intentar buscar un enlace de descarga directo en el HTML
+                download_link_match = re.search(r'href="(https://drive\.google\.com/uc\?[^"]*export=download[^"]*)"', html_content)
+                if download_link_match:
+                    direct_url = download_link_match.group(1).replace('&amp;', '&')
+                    print(f"DEBUG: Found direct download link: {direct_url}")
+                    resp = session.get(direct_url, headers=headers, timeout=120, allow_redirects=True, stream=True)
+                    print(f"DEBUG: Direct download response status: {resp.status_code}")
+        
+        # Verificar que tenemos una respuesta válida
+        resp.raise_for_status()
+        
+        # Verificar el Content-Type final
+        final_content_type = resp.headers.get("Content-Type", "").lower()
+        print(f"DEBUG: Final Content-Type: {final_content_type}")
+        
+        if "text/html" in final_content_type:
+            print("WARNING: Still receiving HTML - download may have failed")
+            # Intentar leer un poco del contenido para verificar
+            peek = next(resp.iter_content(chunk_size=1024), b"")
+            if b"<!DOCTYPE html" in peek or b"<html" in peek:
+                raise RuntimeError("Download failed - received HTML instead of file content")
+        
+        # Descargar el archivo
+        print(f"DEBUG: Starting file download to: {out_path}")
+        total_size = 0
+        
+        with open(out_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=1024 * 512):
+                if chunk:
+                    f.write(chunk)
+                    total_size += len(chunk)
+        
+        print(f"DEBUG: Downloaded {total_size} bytes")
+        
+        # Verificar que el archivo se descargó correctamente
+        if total_size == 0:
+            raise RuntimeError("Downloaded file is empty")
+        
+        # Verificar que el archivo existe y tiene contenido
+        if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
+            raise RuntimeError("Download failed - file is empty or doesn't exist")
+            
+        print(f"DEBUG: File downloaded successfully, size: {os.path.getsize(out_path)} bytes")
+        
+    except requests.exceptions.RequestException as e:
+        print(f"DEBUG: Request failed: {str(e)}")
+        raise RuntimeError(f"Failed to download file: {str(e)}")
+    except Exception as e:
+        print(f"DEBUG: Unexpected error during download: {str(e)}")
+        raise RuntimeError(f"Download error: {str(e)}")
 
 def ffprobe_duration(path: str) -> float:
-    out = run(f'ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "{path}"')
+    """Obtener duración del archivo con mejor manejo de errores"""
+    print(f"DEBUG: Getting duration for: {path}")
+    
+    # Verificar que el archivo existe y no está vacío
+    if not os.path.exists(path):
+        raise RuntimeError(f"File does not exist: {path}")
+    
+    file_size = os.path.getsize(path)
+    if file_size == 0:
+        raise RuntimeError(f"File is empty: {path}")
+    
+    print(f"DEBUG: File size: {file_size} bytes")
+    
     try:
-        return float(out.strip())
-    except:
-        raise RuntimeError("Cannot read duration")
+        # Intentar obtener información básica del archivo primero
+        probe_cmd = f'ffprobe -v quiet -print_format json -show_format "{path}"'
+        out = run(probe_cmd)
+        print(f"DEBUG: ffprobe output: {out[:200]}...")
+        
+        # Luego obtener la duración
+        out = run(f'ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "{path}"')
+        duration = float(out.strip())
+        print(f"DEBUG: Duration: {duration} seconds")
+        return duration
+    except ValueError as e:
+        print(f"DEBUG: Could not parse duration: {out.strip()}")
+        raise RuntimeError(f"Cannot parse duration from: {out.strip()}")
+    except Exception as e:
+        print(f"DEBUG: ffprobe failed: {str(e)}")
+        # Intentar con más verbosidad para diagnosticar el problema
+        try:
+            debug_out = run(f'ffprobe -v debug "{path}"')
+            print(f"DEBUG: ffprobe debug output: {debug_out[:500]}...")
+        except:
+            pass
+        raise RuntimeError(f"Cannot read file duration. File may be corrupted: {str(e)}")
 
 def get_random_audio_start(audio_path: str, video_duration: float) -> float:
     """Obtiene un punto de inicio aleatorio para el audio que permita cubrir toda la duración del video"""
@@ -177,39 +309,63 @@ def render(
         ipath = os.path.join(tmp, "overlay_image.jpg") if overlay_image_url else None
         out   = os.path.join(tmp, "out_final.mp4")
 
-        # Guardar binarios
-        # Descargar video/audio desde URL (robusto para Google Drive)
-        _download_with_drive_confirm(video_url, vpath)
-        _download_with_drive_confirm(audio_url, apath)
-        
-        # Guardar imagen si se proporciona
-        if overlay_image_url:
-            _download_with_drive_confirm(overlay_image_url, ipath)
-        
-            # Preprocesar imagen: redondear 8px, escalar dentro de 400x400 y centrar sobre lienzo 400x400
-            try:
-                rounded_path = os.path.join(tmp, "overlay_image_rounded.png")
-                with Image.open(ipath) as im:
-                    im = im.convert("RGBA")
-                    max_w, max_h = 400, 400
-                    im.thumbnail((max_w, max_h))
-                    w, h = im.size
-                    radius = 24
-                    mask = Image.new("L", (w, h), 0)
-                    draw = ImageDraw.Draw(mask)
-                    draw.rounded_rectangle((0, 0, w, h), radius=radius, fill=255)
-                    im.putalpha(mask)
-                    canvas = Image.new("RGBA", (max_w, max_h), (0, 0, 0, 0))
-                    canvas.paste(im, ((max_w - w) // 2, (max_h - h) // 2), im)
-                    canvas.save(rounded_path)
-                ipath = rounded_path
-            except Exception:
-                # Si Pillow falla, continuar con la imagen original
-                pass
+        try:
+            # Descargar archivos
+            print(f"DEBUG: Starting download of video from: {video_url}")
+            _download_with_drive_confirm(video_url, vpath)
+            print(f"DEBUG: Video download completed")
+            
+            print(f"DEBUG: Starting download of audio from: {audio_url}")
+            _download_with_drive_confirm(audio_url, apath)
+            print(f"DEBUG: Audio download completed")
+            
+            # Guardar imagen si se proporciona
+            if overlay_image_url:
+                print(f"DEBUG: Starting download of image from: {overlay_image_url}")
+                _download_with_drive_confirm(overlay_image_url, ipath)
+                print(f"DEBUG: Image download completed")
+            
+                # Preprocesar imagen: redondear 8px, escalar dentro de 400x400 y centrar sobre lienzo 400x400
+                try:
+                    rounded_path = os.path.join(tmp, "overlay_image_rounded.png")
+                    with Image.open(ipath) as im:
+                        im = im.convert("RGBA")
+                        max_w, max_h = 400, 400
+                        im.thumbnail((max_w, max_h))
+                        w, h = im.size
+                        radius = 24
+                        mask = Image.new("L", (w, h), 0)
+                        draw = ImageDraw.Draw(mask)
+                        draw.rounded_rectangle((0, 0, w, h), radius=radius, fill=255)
+                        im.putalpha(mask)
+                        canvas = Image.new("RGBA", (max_w, max_h), (0, 0, 0, 0))
+                        canvas.paste(im, ((max_w - w) // 2, (max_h - h) // 2), im)
+                        canvas.save(rounded_path)
+                    ipath = rounded_path
+                    print(f"DEBUG: Image preprocessing completed")
+                except Exception as e:
+                    print(f"DEBUG: Image preprocessing failed: {str(e)}")
+                    # Si Pillow falla, continuar con la imagen original
+                    pass
+
+        except Exception as e:
+            print(f"DEBUG: Download failed: {str(e)}")
+            return JSONResponse(status_code=500, content={"error": f"Download failed: {str(e)}"})
+
+        # Verificar archivos descargados
+        if not os.path.exists(vpath) or os.path.getsize(vpath) == 0:
+            return JSONResponse(status_code=500, content={"error": "Video download failed or file is empty"})
+        if not os.path.exists(apath) or os.path.getsize(apath) == 0:
+            return JSONResponse(status_code=500, content={"error": "Audio download failed or file is empty"})
 
         # Duración vídeo
-        dur = ffprobe_duration(vpath)
-        dur_s = f"{dur:.3f}"
+        try:
+            dur = ffprobe_duration(vpath)
+            dur_s = f"{dur:.3f}"
+            print(f"DEBUG: Video duration: {dur} seconds")
+        except Exception as e:
+            print(f"DEBUG: Failed to get video duration: {str(e)}")
+            return JSONResponse(status_code=500, content={"error": f"Cannot process video file: {str(e)}"})
 
         # Obtener punto de inicio aleatorio del audio si se solicita
         audio_start = 0.0
@@ -218,8 +374,14 @@ def render(
             print(f"DEBUG: Using random audio start at {audio_start:.3f} seconds")
 
         # Recorte/normalización audio con punto de inicio aleatorio
-        cmd_trim = f'ffmpeg -y -ss {audio_start:.3f} -i "{apath}" -t {dur_s} -ac 2 -ar 48000 -c:a aac "{taac}"'
-        run(cmd_trim)
+        try:
+            cmd_trim = f'ffmpeg -y -ss {audio_start:.3f} -i "{apath}" -t {dur_s} -ac 2 -ar 48000 -c:a aac "{taac}"'
+            print(f"DEBUG: Trimming audio with command: {cmd_trim}")
+            run(cmd_trim)
+            print(f"DEBUG: Audio trimming completed")
+        except Exception as e:
+            print(f"DEBUG: Audio trimming failed: {str(e)}")
+            return JSONResponse(status_code=500, content={"error": f"Audio processing failed: {str(e)}"})
 
         # Construir comando FFmpeg - versión simplificada pero funcional
         
