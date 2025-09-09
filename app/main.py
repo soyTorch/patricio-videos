@@ -718,7 +718,6 @@ def render(
     # En lugar de devolver el streaming, subir a Google Drive
     try:
         # Crear archivo temporal para subir
-        import tempfile
         with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_upload_file:
             temp_upload_file.write(video_data)
             temp_upload_path = temp_upload_file.name
