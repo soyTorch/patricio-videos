@@ -147,13 +147,18 @@ def render(
         if file_size == 0:
             return JSONResponse(status_code=500, content={"error": "Video processing failed - output file is empty"})
 
-        def iterfile():
-            with open(out, "rb") as f:
-                while True:
-                    chunk = f.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    yield chunk
+        # Leer el archivo completo antes de que se elimine el directorio temporal
+        print(f"DEBUG: Reading output file into memory")
+        with open(out, "rb") as f:
+            video_data = f.read()
+        print(f"DEBUG: File read successfully, {len(video_data)} bytes in memory")
 
-        headers = {"Content-Disposition": 'attachment; filename="out_final.mp4"'}
-        return StreamingResponse(iterfile(), media_type="video/mp4", headers=headers)
+    # Ahora el directorio temporal se ha eliminado, pero tenemos los datos en memoria
+    def iterfile():
+        # Convertir bytes a chunks para streaming
+        chunk_size = 1024 * 1024  # 1MB chunks
+        for i in range(0, len(video_data), chunk_size):
+            yield video_data[i:i + chunk_size]
+
+    headers = {"Content-Disposition": 'attachment; filename="out_final.mp4"'}
+    return StreamingResponse(iterfile(), media_type="video/mp4", headers=headers)
