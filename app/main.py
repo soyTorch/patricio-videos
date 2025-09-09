@@ -49,8 +49,12 @@ def get_random_audio_start(audio_path: str, video_duration: float) -> float:
         return 0.0  # En caso de error, empezar desde el inicio
 
 def build_drawtext_expr(text: str, position: str) -> str:
-    # Escapar ':' y '\' y "'" para drawtext
-    safe = text.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+    # Limpiar texto de caracteres problemáticos y escapar para drawtext
+    # Remover emojis y caracteres no-ASCII que pueden causar problemas
+    import re
+    clean_text = re.sub(r'[^\x00-\x7F]+', '', text)  # Solo ASCII
+    safe = clean_text.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'").replace('"', '\\"')
+    
     if position == "top":
         x_pos = "(w-text_w)/2"
         y_pos = "40"  # Más arriba
@@ -60,7 +64,7 @@ def build_drawtext_expr(text: str, position: str) -> str:
     else:  # bottom
         x_pos = "(w-text_w)/2"
         y_pos = "h-text_h-200"  # Más arriba que antes
-    return f"drawtext=fontfile={FONT_PATH}:text='{safe}':fontsize=48:fontcolor=white:box=1:boxcolor=black@0.45:boxborderw=10:x={x_pos}:y={y_pos}"
+    return f",drawtext=fontfile={FONT_PATH}:text='{safe}':fontsize=48:fontcolor=white:box=1:boxcolor=black@0.45:boxborderw=10:x={x_pos}:y={y_pos}"
 
 def build_image_overlay_filter(image_path: str) -> str:
     """Construye el filtro para superponer una imagen con bordes redondeados en el centro"""
@@ -154,41 +158,49 @@ def render(
 
         # Construir comando FFmpeg - versión simplificada pero funcional
         
-        # Preparar inputs
+        # Versión simplificada y funcional
         if overlay_image and ipath:
-            # Con imagen
+            # Con imagen: construir filtros paso a paso
             inputs_cmd = f'-i "{vpath}" -i "{taac}" -i "{ipath}"'
             
-            # Filtro complejo con imagen superpuesta y capa oscura
             filter_parts = []
             
-            # Procesar imagen
-            filter_parts.append("[2:v]scale=400:400:force_original_aspect_ratio=decrease[img]")
+            # 1. Procesar imagen
+            filter_parts.append("[2:v]scale=400:400:force_original_aspect_ratio=decrease[img_scaled]")
             
-            # Video base con escala
-            vf_base = "[0:v]"
+            # 2. Video base
+            video_chain = "[0:v]"
             scale = build_scale_pad(target)
             if scale:
-                vf_base += f",{scale}"
+                video_chain += f",{scale}"
+                video_chain += "[v1]"
+            else:
+                video_chain += "[v1]"
+            filter_parts.append(video_chain)
             
-            # Añadir capa oscura si se solicita
+            # 3. Capa oscura si se solicita
             if str(dark_overlay).lower() == "true":
-                filter_parts.append(f"color=black@{dark_overlay_opacity}:1080x1920[overlay]")
-                vf_base += ",[0:v][overlay]overlay"
+                filter_parts.append(f"color=black@{dark_overlay_opacity}:1080x1920[dark_overlay]")
+                filter_parts.append("[v1][dark_overlay]overlay[v2]")
+                current_video = "[v2]"
+            else:
+                current_video = "[v1]"
             
-            # Superponer imagen en el centro
-            vf_base += ",[0:v][img]overlay=(W-w)/2:(H-h)/2"
+            # 4. Superponer imagen
+            filter_parts.append(f"{current_video}[img_scaled]overlay=(W-w)/2:(H-h)/2[v3]")
+            current_video = "[v3]"
             
-            # Añadir texto
+            # 5. Añadir texto si se proporciona
             if overlay_text:
-                text_filter = build_drawtext_expr(overlay_text, position).replace("drawtext=", "")
-                vf_base += f",{text_filter}"
+                text_filter = build_drawtext_expr(overlay_text, position)
+                filter_parts.append(f"{current_video}{text_filter}[v4]")
+                current_video = "[v4]"
             
-            vf_base += ",format=yuv420p[v]"
-            filter_parts.append(vf_base)
+            # 6. Formato final
+            filter_parts.append(f"{current_video}format=yuv420p[v]")
             
         else:
-            # Sin imagen - funcionalidad original mejorada
+            # Sin imagen - versión simple
             inputs_cmd = f'-i "{vpath}" -i "{taac}"'
             
             vf_parts = []
@@ -198,7 +210,8 @@ def render(
             
             # Capa oscura si se solicita
             if str(dark_overlay).lower() == "true":
-                vf_parts.append(f"color=black@{dark_overlay_opacity}:1080x1920[overlay];[0:v][overlay]overlay")
+                vf_parts.append(f"color=black@{dark_overlay_opacity}:1080x1920[dark_overlay]")
+                vf_parts.append("[0:v][dark_overlay]overlay")
             
             if overlay_text:
                 vf_parts.append(build_drawtext_expr(overlay_text, position))
