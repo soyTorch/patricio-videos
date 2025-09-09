@@ -115,6 +115,7 @@ def render(
     random_audio_start: str = Form("false"),
     dark_overlay: str = Form("false"),
     dark_overlay_opacity: float = Form(0.4),
+    saturation_boost: float = Form(1.06),
 ):
     check_auth(authorization)
 
@@ -192,10 +193,9 @@ def render(
             # 2) Preparar el video base: si hay escala/pad, aplicarlo; si no, usar 'null'
             scale = build_scale_pad(target)
             if scale:
-                # Aplica filtros directamente sin coma entre la etiqueta y el filtro
-                parts.append(f"[0:v]{scale}[base]")
+                parts.append(f"[0:v]{scale},eq=saturation={saturation_boost}[base]")
             else:
-                parts.append("[0:v]null[base]")
+                parts.append(f"[0:v]eq=saturation={saturation_boost}[base]")
 
             # 3) Si se solicita, aplicar una capa oscura sobre el video base
             base_label = "base"
@@ -228,9 +228,9 @@ def render(
             parts = []
             scale = build_scale_pad(target)
             if scale:
-                parts.append(f"[0:v]{scale}[base]")
+                parts.append(f"[0:v]{scale},eq=saturation={saturation_boost}[base]")
             else:
-                parts.append("[0:v]null[base]")
+                parts.append(f"[0:v]eq=saturation={saturation_boost}[base]")
 
             base_label = "base"
             if str(dark_overlay).lower() == "true":
