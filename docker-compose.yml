@@ -8,6 +8,9 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - API_KEY=${API_KEY:-change_me}
+      # Opcional: credencial Drive inline (JSON o Base64)
+      - GDRIVE_SERVICE_ACCOUNT_JSON=${GDRIVE_SERVICE_ACCOUNT_JSON:-}
+      - GDRIVE_SERVICE_ACCOUNT_JSON_B64=${GDRIVE_SERVICE_ACCOUNT_JSON_B64:-}
     volumes:
       - ./:/app
     restart: unless-stopped
