@@ -3,6 +3,7 @@ import tempfile
 import subprocess
 import shlex
 import random
+from datetime import datetime
 from typing import Optional
 from PIL import Image, ImageDraw
 
