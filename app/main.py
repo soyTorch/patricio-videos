@@ -188,8 +188,8 @@ def render(
             else:
                 final_in = "[ov]"
 
-            # 5) Formato final y label de salida
-            parts.append(f"{final_in},format=yuv420p[v]")
+            # 5) Formato final y label de salida (sin coma tras la etiqueta)
+            parts.append(f"{final_in}format=yuv420p[v]")
 
             filter_parts = [';'.join(parts)]
             
