@@ -158,32 +158,26 @@ def render(
 
         # Construir comando FFmpeg - versión simplificada pero funcional
         
-        # Con imagen - sintaxis correcta de FFmpeg
+        # Con imagen - sintaxis ultra-simple
         if overlay_image and ipath:
             inputs_cmd = f'-i "{vpath}" -i "{taac}" -i "{ipath}"'
             
-            # Construir filtros por separado
-            filter_parts = []
-            
-            # 1. Procesar imagen
-            filter_parts.append("[2:v]scale=400:400:force_original_aspect_ratio=decrease[img]")
-            
-            # 2. Procesar video base
-            video_base = "[0:v]"
+            # Un solo filtro complejo que funciona
             scale = build_scale_pad(target)
-            if scale:
-                video_base += f",{scale}[v1]"
-            else:
-                video_base += "[v1]"
-            filter_parts.append(video_base)
+            scale_part = f",{scale}" if scale else ""
             
-            # 3. Superponer imagen
-            overlay_step = "[v1][img]overlay=(W-w)/2:(H-h)/2"
+            text_part = ""
             if overlay_text:
                 text_filter = build_drawtext_expr(overlay_text, position)
-                overlay_step += f",{text_filter}"
-            overlay_step += ",format=yuv420p[v]"
-            filter_parts.append(overlay_step)
+                text_part = f",{text_filter}"
+            
+            # Filtro completo en una sola línea
+            filter_complex = (
+                f"[2:v]scale=400:400[img];"
+                f"[0:v]{scale_part}[base];"
+                f"[base][img]overlay=(W-w)/2:(H-h)/2{text_part},format=yuv420p[v]"
+            )
+            filter_parts = [filter_complex]
             
         else:
             # Sin imagen - usar la lógica que ya funcionaba
