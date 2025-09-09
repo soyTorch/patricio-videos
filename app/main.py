@@ -150,7 +150,7 @@ def render(
                     max_w, max_h = 400, 400
                     im.thumbnail((max_w, max_h))
                     w, h = im.size
-                    radius = 8
+                    radius = 24
                     mask = Image.new("L", (w, h), 0)
                     draw = ImageDraw.Draw(mask)
                     draw.rounded_rectangle((0, 0, w, h), radius=radius, fill=255)
@@ -197,10 +197,17 @@ def render(
             else:
                 parts.append("[0:v]null[base]")
 
-            # 3) Hacer overlay de la imagen centrada
-            parts.append("[base][img]overlay=(W-w)/2:(H-h)/2[ov]")
+            # 3) Si se solicita, aplicar una capa oscura sobre el video base
+            base_label = "base"
+            if str(dark_overlay).lower() == "true":
+                parts.append(f"color=black@{dark_overlay_opacity}:size=1080x1920[dark]")
+                parts.append("[base][dark]overlay[base_dark]")
+                base_label = "base_dark"
 
-            # 4) Añadir texto si corresponde
+            # 4) Hacer overlay de la imagen centrada
+            parts.append(f"[{base_label}][img]overlay=(W-w)/2:(H-h)/2[ov]")
+
+            # 5) Añadir texto si corresponde
             if overlay_text:
                 text_filter = build_drawtext_expr(overlay_text, position)
                 # Encadena drawtext correctamente sobre la etiqueta previa
@@ -209,25 +216,36 @@ def render(
             else:
                 final_in = "[ov]"
 
-            # 5) Formato final y label de salida (sin coma tras la etiqueta)
+            # 6) Formato final y label de salida (sin coma tras la etiqueta)
             parts.append(f"{final_in}format=yuv420p[v]")
 
             filter_parts = [';'.join(parts)]
             
         else:
-            # Sin imagen - usar la lógica que ya funcionaba
+            # Sin imagen - aplicar escala, capa oscura opcional y texto con labels explícitas
             inputs_cmd = f'-i "{vpath}" -i "{taac}"'
-            
-            vf_parts = []
+
+            parts = []
             scale = build_scale_pad(target)
             if scale:
-                vf_parts.append(scale)
-            
+                parts.append(f"[0:v]{scale}[base]")
+            else:
+                parts.append("[0:v]null[base]")
+
+            base_label = "base"
+            if str(dark_overlay).lower() == "true":
+                parts.append(f"color=black@{dark_overlay_opacity}:size=1080x1920[dark]")
+                parts.append("[base][dark]overlay[base_dark]")
+                base_label = "base_dark"
+
+            final_in = f"[{base_label}]"
             if overlay_text:
-                vf_parts.append(build_drawtext_expr(overlay_text, position))
-            
-            vf_parts.append("format=yuv420p")
-            filter_parts = [f"[0:v]{','.join(vf_parts)}[v]"]
+                text_filter = build_drawtext_expr(overlay_text, position)
+                parts.append(f"{final_in}{text_filter}[txt]")
+                final_in = "[txt]"
+
+            parts.append(f"{final_in}format=yuv420p[v]")
+            filter_parts = [';'.join(parts)]
         
         # Audio
         mix = (str(mix_audio).lower() == "true")
