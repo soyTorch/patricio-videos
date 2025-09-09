@@ -139,7 +139,7 @@ def render(
         apath = os.path.join(tmp, "in_audio.mp3")
         taac  = os.path.join(tmp, "trim_audio.aac")
         # Prepara ruta de imagen si viene como archivo o URL
-        ipath = os.path.join(tmp, "overlay_image.jpg") if (overlay_image or overlay_image_url) else None
+        ipath = os.path.join(tmp, "overlay_image.jpg") if overlay_image_url else None
         out   = os.path.join(tmp, "out_final.mp4")
 
         # Guardar binarios
