@@ -104,8 +104,8 @@ def health():
 @app.post("/render")
 def render(
     authorization: Optional[str] = Header(None),
-    video: UploadFile = File(...),
-    audio: UploadFile = File(...),
+    video: Optional[UploadFile] = File(None),
+    audio: Optional[UploadFile] = File(None),
     overlay_text: str = Form(""),
     position: str = Form("bottom"),
     mix_audio: str = Form("false"),
@@ -129,6 +129,12 @@ def render(
         crf = int(crf)
     except:
         return JSONResponse(status_code=400, content={"error": "crf invalid"})
+
+    # Validación: exigir al menos una fuente para video y audio
+    if not video_url and video is None:
+        return JSONResponse(status_code=400, content={"error": "video or video_url required"})
+    if not audio_url and audio is None:
+        return JSONResponse(status_code=400, content={"error": "audio or audio_url required"})
 
     with tempfile.TemporaryDirectory() as tmp:
         vpath = os.path.join(tmp, "in_video.mp4")
@@ -205,7 +211,7 @@ def render(
         # Construir comando FFmpeg - versión simplificada pero funcional
         
         # Con imagen - construir grafo con labels explícitas y sin filtros vacíos
-        if overlay_image and ipath:
+        if ipath:
             inputs_cmd = f'-i "{vpath}" -i "{taac}" -i "{ipath}"'
 
             # Preparar fragmentos de filtro de forma determinista
