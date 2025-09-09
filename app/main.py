@@ -104,18 +104,16 @@ def health():
 @app.post("/render")
 def render(
     authorization: Optional[str] = Header(None),
-    video: Optional[UploadFile] = File(None),
-    audio: Optional[UploadFile] = File(None),
+    # Solo URLs (fuentes obligatorias)
+    video_url: str = Form(...),
+    audio_url: str = Form(...),
+    overlay_image_url: str = Form(""),
+    # Personalización
     overlay_text: str = Form(""),
     position: str = Form("bottom"),
     mix_audio: str = Form("false"),
     target: str = Form("original"),
     crf: int = Form(18),
-    # Nuevos parámetros para videos de jazz
-    overlay_image: Optional[UploadFile] = File(None),
-    video_url: str = Form(""),
-    audio_url: str = Form(""),
-    overlay_image_url: str = Form(""),
     random_audio_start: str = Form("false"),
     dark_overlay: str = Form("false"),
     dark_overlay_opacity: float = Form(0.4),
@@ -130,11 +128,11 @@ def render(
     except:
         return JSONResponse(status_code=400, content={"error": "crf invalid"})
 
-    # Validación: exigir al menos una fuente para video y audio
-    if not video_url and video is None:
-        return JSONResponse(status_code=400, content={"error": "video or video_url required"})
-    if not audio_url and audio is None:
-        return JSONResponse(status_code=400, content={"error": "audio or audio_url required"})
+    # Validación: URLs obligatorias
+    if not video_url:
+        return JSONResponse(status_code=400, content={"error": "video_url required"})
+    if not audio_url:
+        return JSONResponse(status_code=400, content={"error": "audio_url required"})
 
     with tempfile.TemporaryDirectory() as tmp:
         vpath = os.path.join(tmp, "in_video.mp4")
@@ -145,34 +143,24 @@ def render(
         out   = os.path.join(tmp, "out_final.mp4")
 
         # Guardar binarios
-        if video_url:
-            r = requests.get(video_url, timeout=60)
-            r.raise_for_status()
-            with open(vpath, "wb") as f:
-                f.write(r.content)
-        else:
-            with open(vpath, "wb") as f:
-                f.write(video.file.read())
+        # Descargar video/audio desde URL
+        r = requests.get(video_url, timeout=60, allow_redirects=True)
+        r.raise_for_status()
+        with open(vpath, "wb") as f:
+            f.write(r.content)
 
-        if audio_url:
-            r = requests.get(audio_url, timeout=60)
-            r.raise_for_status()
-            with open(apath, "wb") as f:
-                f.write(r.content)
-        else:
-            with open(apath, "wb") as f:
-                f.write(audio.file.read())
+        r = requests.get(audio_url, timeout=60, allow_redirects=True)
+        r.raise_for_status()
+        with open(apath, "wb") as f:
+            f.write(r.content)
         
         # Guardar imagen si se proporciona
-        if overlay_image or overlay_image_url:
-            if overlay_image_url:
-                r = requests.get(overlay_image_url, timeout=60)
+        if overlay_image_url:
+            r = requests.get(overlay_image_url, timeout=60, allow_redirects=True)
                 r.raise_for_status()
                 with open(ipath, "wb") as f:
                     f.write(r.content)
-            else:
-                with open(ipath, "wb") as f:
-                    f.write(overlay_image.file.read())
+        
             # Preprocesar imagen: redondear 8px, escalar dentro de 400x400 y centrar sobre lienzo 400x400
             try:
                 rounded_path = os.path.join(tmp, "overlay_image_rounded.png")
