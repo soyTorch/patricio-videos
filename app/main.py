@@ -104,8 +104,8 @@ def health():
 @app.post("/render")
 def render(
     authorization: Optional[str] = Header(None),
-    video: UploadFile = File(...),
-    audio: UploadFile = File(...),
+    video: Optional[UploadFile] = File(None),
+    audio: Optional[UploadFile] = File(None),
     overlay_text: str = Form(""),
     position: str = Form("bottom"),
     mix_audio: str = Form("false"),
@@ -138,6 +138,12 @@ def render(
         out   = os.path.join(tmp, "out_final.mp4")
 
         # Guardar binarios
+        # Validación: necesitamos fuente de video y audio
+        if not video_url and video is None:
+            return JSONResponse(status_code=400, content={"error": "Missing video or video_url"})
+        if not audio_url and audio is None:
+            return JSONResponse(status_code=400, content={"error": "Missing audio or audio_url"})
+
         if video_url:
             r = requests.get(video_url, timeout=60)
             r.raise_for_status()
