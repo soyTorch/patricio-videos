@@ -7,6 +7,7 @@ from typing import Optional
 from PIL import Image, ImageDraw
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Header, Response
+import requests
 from fastapi.responses import StreamingResponse, JSONResponse
 
 API_KEY = os.getenv("API_KEY", "change_me")
@@ -112,6 +113,9 @@ def render(
     crf: int = Form(18),
     # Nuevos parámetros para videos de jazz
     overlay_image: Optional[UploadFile] = File(None),
+    video_url: str = Form(""),
+    audio_url: str = Form(""),
+    overlay_image_url: str = Form(""),
     random_audio_start: str = Form("false"),
     dark_overlay: str = Form("false"),
     dark_overlay_opacity: float = Form(0.4),
@@ -134,15 +138,34 @@ def render(
         out   = os.path.join(tmp, "out_final.mp4")
 
         # Guardar binarios
-        with open(vpath, "wb") as f:
-            f.write(video.file.read())
-        with open(apath, "wb") as f:
-            f.write(audio.file.read())
+        if video_url:
+            r = requests.get(video_url, timeout=60)
+            r.raise_for_status()
+            with open(vpath, "wb") as f:
+                f.write(r.content)
+        else:
+            with open(vpath, "wb") as f:
+                f.write(video.file.read())
+
+        if audio_url:
+            r = requests.get(audio_url, timeout=60)
+            r.raise_for_status()
+            with open(apath, "wb") as f:
+                f.write(r.content)
+        else:
+            with open(apath, "wb") as f:
+                f.write(audio.file.read())
         
         # Guardar imagen si se proporciona
-        if overlay_image:
-            with open(ipath, "wb") as f:
-                f.write(overlay_image.file.read())
+        if overlay_image or overlay_image_url:
+            if overlay_image_url:
+                r = requests.get(overlay_image_url, timeout=60)
+                r.raise_for_status()
+                with open(ipath, "wb") as f:
+                    f.write(r.content)
+            else:
+                with open(ipath, "wb") as f:
+                    f.write(overlay_image.file.read())
             # Preprocesar imagen: redondear 8px, escalar dentro de 400x400 y centrar sobre lienzo 400x400
             try:
                 rounded_path = os.path.join(tmp, "overlay_image_rounded.png")
