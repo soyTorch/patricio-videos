@@ -13,7 +13,7 @@ import re
 from fastapi.responses import StreamingResponse, JSONResponse
 from google.oauth2.service_account import Credentials as GCredentials
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
+from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 import io
 import glob
 
@@ -160,7 +160,7 @@ def _maybe_get_drive_service():
             print("DEBUG: Credentials file is not valid JSON")
             return None
             
-        scopes = ["https://www.googleapis.com/auth/drive.readonly"]
+        scopes = ["https://www.googleapis.com/auth/drive"]
         creds = GCredentials.from_service_account_file(creds_path, scopes=scopes)
         service = build("drive", "v3", credentials=creds, cache_discovery=False)
         print("DEBUG: Google Drive service initialized successfully")
@@ -314,7 +314,7 @@ def _maybe_get_drive_service():
         # Crear credenciales desde el archivo
         creds = GCredentials.from_service_account_file(
             creds_path,
-            scopes=['https://www.googleapis.com/auth/drive.readonly']
+            scopes=['https://www.googleapis.com/auth/drive']
         )
         
         # Crear el servicio
@@ -325,6 +325,63 @@ def _maybe_get_drive_service():
     except Exception as e:
         print(f"DEBUG: Error creating Google Drive service: {e}")
         return None
+
+def _upload_to_drive(file_path: str, filename: str, folder_id: Optional[str] = None):
+    """Sube un archivo a Google Drive y devuelve la URL compartible"""
+    try:
+        service = _maybe_get_drive_service()
+        if not service:
+            raise Exception("No se pudo inicializar el servicio de Google Drive")
+        
+        # Metadatos del archivo
+        file_metadata = {
+            'name': filename
+        }
+        
+        # Si se especifica una carpeta, añadirla como parent
+        if folder_id:
+            file_metadata['parents'] = [folder_id]
+        
+        # Crear el objeto de media
+        media = MediaFileUpload(file_path, mimetype='video/mp4', resumable=True)
+        
+        # Subir el archivo
+        print(f"DEBUG: Subiendo {filename} a Google Drive...")
+        file = service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id,name,webViewLink,webContentLink'
+        ).execute()
+        
+        # Hacer el archivo público para que sea accesible
+        permission = {
+            'type': 'anyone',
+            'role': 'reader'
+        }
+        service.permissions().create(
+            fileId=file.get('id'),
+            body=permission
+        ).execute()
+        
+        print(f"DEBUG: Archivo subido exitosamente. ID: {file.get('id')}")
+        
+        # Construir URL de descarga directa
+        file_id = file.get('id')
+        download_url = f"https://drive.google.com/file/d/{file_id}/view?usp=sharing"
+        direct_download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+        
+        return {
+            'file_id': file_id,
+            'filename': file.get('name'),
+            'view_url': download_url,
+            'download_url': direct_download_url,
+            'web_view_link': file.get('webViewLink'),
+            'web_content_link': file.get('webContentLink')
+        }
+        
+    except Exception as e:
+        print(f"DEBUG: Error subiendo archivo a Drive: {e}")
+        raise Exception(f"Error subiendo archivo a Google Drive: {str(e)}")
 
 @app.get("/validate-credentials")
 def validate_credentials(authorization: Optional[str] = Header(None)):
@@ -658,12 +715,44 @@ def render(
             video_data = f.read()
         print(f"DEBUG: File read successfully, {len(video_data)} bytes in memory")
 
-    # Ahora el directorio temporal se ha eliminado, pero tenemos los datos en memoria
-    def iterfile():
-        # Convertir bytes a chunks para streaming
-        chunk_size = 1024 * 1024  # 1MB chunks
-        for i in range(0, len(video_data), chunk_size):
-            yield video_data[i:i + chunk_size]
+    # En lugar de devolver el streaming, subir a Google Drive
+    try:
+        # Crear archivo temporal para subir
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_upload_file:
+            temp_upload_file.write(video_data)
+            temp_upload_path = temp_upload_file.name
+        
+        # Generar nombre único para el archivo
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"rendered_video_{timestamp}.mp4"
+        
+        print(f"DEBUG: Subiendo video generado a Google Drive como {filename}")
+        drive_result = _upload_to_drive(temp_upload_path, filename)
+        
+        # Limpiar archivo temporal de subida
+        os.remove(temp_upload_path)
+        
+        # Devolver información del archivo subido
+        return JSONResponse({
+            "success": True,
+            "message": "Video generado y subido exitosamente a Google Drive",
+            "timestamp": datetime.now().isoformat(),
+            "file_info": drive_result,
+            "processing_stats": {
+                "video_size_bytes": len(video_data),
+                "video_size_mb": round(len(video_data) / (1024 * 1024), 2)
+            }
+        })
+        
+    except Exception as upload_error:
+        print(f"ERROR: Error subiendo a Drive: {upload_error}")
+        
+        # Si falla la subida, devolver el archivo como antes (fallback)
+        def iterfile():
+            chunk_size = 1024 * 1024  # 1MB chunks
+            for i in range(0, len(video_data), chunk_size):
+                yield video_data[i:i + chunk_size]
 
-    headers = {"Content-Disposition": 'attachment; filename="out_final.mp4"'}
-    return StreamingResponse(iterfile(), media_type="video/mp4", headers=headers)
+        headers = {"Content-Disposition": 'attachment; filename="out_final.mp4"'}
+        return StreamingResponse(iterfile(), media_type="video/mp4", headers=headers)
