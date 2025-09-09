@@ -158,60 +158,44 @@ def render(
 
         # Construir comando FFmpeg - versión simplificada pero funcional
         
-        # Versión simplificada y funcional
+        # Versión ultra-simplificada que funciona
         if overlay_image and ipath:
-            # Con imagen: construir filtros paso a paso
+            # Con imagen - usar overlay simple
             inputs_cmd = f'-i "{vpath}" -i "{taac}" -i "{ipath}"'
             
-            filter_parts = []
+            # Construir filtro paso a paso de manera simple
+            filters = []
             
-            # 1. Procesar imagen
-            filter_parts.append("[2:v]scale=400:400:force_original_aspect_ratio=decrease[img_scaled]")
+            # Escalar imagen
+            filters.append("[2:v]scale=400:400:force_original_aspect_ratio=decrease[img]")
             
-            # 2. Video base
-            video_chain = "[0:v]"
+            # Video base
+            video_filter = "[0:v]"
             scale = build_scale_pad(target)
             if scale:
-                video_chain += f",{scale}"
-                video_chain += "[v1]"
-            else:
-                video_chain += "[v1]"
-            filter_parts.append(video_chain)
+                video_filter += f",{scale}"
             
-            # 3. Capa oscura si se solicita
-            if str(dark_overlay).lower() == "true":
-                filter_parts.append(f"color=black@{dark_overlay_opacity}:1080x1920[dark_overlay]")
-                filter_parts.append("[v1][dark_overlay]overlay[v2]")
-                current_video = "[v2]"
-            else:
-                current_video = "[v1]"
+            # Superponer imagen
+            video_filter += "[base];[base][img]overlay=(W-w)/2:(H-h)/2"
             
-            # 4. Superponer imagen
-            filter_parts.append(f"{current_video}[img_scaled]overlay=(W-w)/2:(H-h)/2[v3]")
-            current_video = "[v3]"
-            
-            # 5. Añadir texto si se proporciona
+            # Añadir texto si se proporciona
             if overlay_text:
                 text_filter = build_drawtext_expr(overlay_text, position)
-                filter_parts.append(f"{current_video},{text_filter}[v4]")
-                current_video = "[v4]"
+                video_filter += f",{text_filter}"
             
-            # 6. Formato final
-            filter_parts.append(f"{current_video}format=yuv420p[v]")
+            video_filter += ",format=yuv420p[v]"
+            filters.append(video_filter)
+            
+            filter_parts = filters
             
         else:
-            # Sin imagen - versión simple
+            # Sin imagen - usar la lógica que ya funcionaba
             inputs_cmd = f'-i "{vpath}" -i "{taac}"'
             
             vf_parts = []
             scale = build_scale_pad(target)
             if scale:
                 vf_parts.append(scale)
-            
-            # Capa oscura si se solicita
-            if str(dark_overlay).lower() == "true":
-                vf_parts.append(f"color=black@{dark_overlay_opacity}:1080x1920[dark_overlay]")
-                vf_parts.append("[0:v][dark_overlay]overlay")
             
             if overlay_text:
                 vf_parts.append(build_drawtext_expr(overlay_text, position))
