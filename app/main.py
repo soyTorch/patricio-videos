@@ -2,6 +2,7 @@ import os
 import tempfile
 import subprocess
 import shlex
+import random
 from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Header, Response
@@ -34,26 +35,60 @@ def ffprobe_duration(path: str) -> float:
     except:
         raise RuntimeError("Cannot read duration")
 
+def get_random_audio_start(audio_path: str, video_duration: float) -> float:
+    """Obtiene un punto de inicio aleatorio para el audio que permita cubrir toda la duración del video"""
+    try:
+        audio_duration = ffprobe_duration(audio_path)
+        if audio_duration <= video_duration:
+            return 0.0  # Si el audio es más corto que el video, empezar desde el inicio
+        
+        # Calcular el rango válido para el inicio aleatorio
+        max_start = audio_duration - video_duration
+        return random.uniform(0, max_start)
+    except:
+        return 0.0  # En caso de error, empezar desde el inicio
+
 def build_drawtext_expr(text: str, position: str) -> str:
     # Escapar ':' y '\' y "'" para drawtext
     safe = text.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
     if position == "top":
         x_pos = "(w-text_w)/2"
-        y_pos = "60"
+        y_pos = "40"  # Más arriba
     elif position == "center":
         x_pos = "(w-text_w)/2"
-        y_pos = "(h-text_h)/2"
+        y_pos = "(h-text_h)/2-100"  # Un poco más arriba del centro
     else:  # bottom
         x_pos = "(w-text_w)/2"
-        y_pos = "h-text_h-60"
+        y_pos = "h-text_h-200"  # Más arriba que antes
     return f"drawtext=fontfile={FONT_PATH}:text='{safe}':fontsize=48:fontcolor=white:box=1:boxcolor=black@0.45:boxborderw=10:x={x_pos}:y={y_pos}"
+
+def build_image_overlay_filter(image_path: str) -> str:
+    """Construye el filtro para superponer una imagen con bordes redondeados en el centro"""
+    # Crear imagen con bordes redondeados y redimensionar
+    return (
+        f"[1:v]scale=400:400:force_original_aspect_ratio=decrease,"
+        f"pad=400:400:(ow-iw)/2:(oh-ih)/2:color=white@0,"
+        f"geq=lum='if(gt(abs(W/2-X),W/2-20)*gt(abs(H/2-Y),H/2-20)*"
+        f"gt(hypot(20-(W/2-abs(W/2-X)),20-(H/2-abs(H/2-Y))),20),0,lum(X,Y))':"
+        f"cb='if(gt(abs(W/2-X),W/2-20)*gt(abs(H/2-Y),H/2-20)*"
+        f"gt(hypot(20-(W/2-abs(W/2-X)),20-(H/2-abs(H/2-Y))),20),128,cb(X,Y))':"
+        f"cr='if(gt(abs(W/2-X),W/2-20)*gt(abs(H/2-Y),H/2-20)*"
+        f"gt(hypot(20-(W/2-abs(W/2-X)),20-(H/2-abs(H/2-Y))),20),128,cr(X,Y))'[rounded]"
+    )
+
+def build_dark_overlay_filter(opacity: float) -> str:
+    """Construye el filtro para añadir una capa oscura al video"""
+    return f"color=black@{opacity}:size=1080x1920[overlay]"
 
 def build_scale_pad(target: str) -> Optional[str]:
     if target in (None, "", "original"):
         return None
+    if target == "vertical" or target == "9:16":
+        # Formato vertical optimizado para redes sociales
+        return "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black"
     if "x" in target:
         w, h = target.split("x", 1)
-        return f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2"
+        return f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black"
     raise ValueError("Invalid target")
 
 @app.get("/health")
@@ -70,6 +105,11 @@ def render(
     mix_audio: str = Form("false"),
     target: str = Form("original"),
     crf: int = Form(18),
+    # Nuevos parámetros para videos de jazz
+    overlay_image: Optional[UploadFile] = File(None),
+    random_audio_start: str = Form("false"),
+    dark_overlay: str = Form("false"),
+    dark_overlay_opacity: float = Form(0.4),
 ):
     check_auth(authorization)
 
@@ -84,6 +124,7 @@ def render(
         vpath = os.path.join(tmp, "in_video.mp4")
         apath = os.path.join(tmp, "in_audio.mp3")
         taac  = os.path.join(tmp, "trim_audio.aac")
+        ipath = os.path.join(tmp, "overlay_image.jpg") if overlay_image else None
         out   = os.path.join(tmp, "out_final.mp4")
 
         # Guardar binarios
@@ -91,22 +132,40 @@ def render(
             f.write(video.file.read())
         with open(apath, "wb") as f:
             f.write(audio.file.read())
+        
+        # Guardar imagen si se proporciona
+        if overlay_image:
+            with open(ipath, "wb") as f:
+                f.write(overlay_image.file.read())
 
         # Duración vídeo
         dur = ffprobe_duration(vpath)
         dur_s = f"{dur:.3f}"
 
-        # Recorte/normalización audio
-        cmd_trim = f'ffmpeg -y -i "{apath}" -t {dur_s} -ac 2 -ar 48000 -c:a aac "{taac}"'
+        # Obtener punto de inicio aleatorio del audio si se solicita
+        audio_start = 0.0
+        if str(random_audio_start).lower() == "true":
+            audio_start = get_random_audio_start(apath, dur)
+            print(f"DEBUG: Using random audio start at {audio_start:.3f} seconds")
+
+        # Recorte/normalización audio con punto de inicio aleatorio
+        cmd_trim = f'ffmpeg -y -ss {audio_start:.3f} -i "{apath}" -t {dur_s} -ac 2 -ar 48000 -c:a aac "{taac}"'
         run(cmd_trim)
 
-        # Filtros de vídeo
+        # Versión simplificada - empezar con funcionalidad básica y añadir características gradualmente
+        # Por ahora, mantener la funcionalidad original pero con las mejoras de audio aleatorio y texto posicionado
+        
+        # Filtros de vídeo básicos
         vf_parts = []
         scale = build_scale_pad(target)
         if scale:
             vf_parts.append(scale)
         vf_parts.append("format=yuv420p")
-        vf_parts.append(build_drawtext_expr(overlay_text, position))
+        
+        # Añadir texto si se proporciona
+        if overlay_text:
+            vf_parts.append(build_drawtext_expr(overlay_text, position))
+        
         vf = ",".join(vf_parts)
 
         # Audio: reemplazar o mezclar
