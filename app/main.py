@@ -3,14 +3,15 @@ import tempfile
 import subprocess
 import shlex
 import random
+import uuid
 from datetime import datetime
 from typing import Optional
 from PIL import Image, ImageDraw
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Header, Response
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Header, Response, Request
 import requests
 import re
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from google.oauth2.service_account import Credentials as GCredentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
@@ -19,8 +20,12 @@ import glob
 
 API_KEY = os.getenv("API_KEY", "change_me")
 FONT_PATH = "/System/Library/Fonts/Geneva.ttf"
+VIDEOS_DIR = os.path.join(os.getcwd(), "generated_videos")
 
 app = FastAPI(title="Video Render API", version="1.0.0")
+
+# Crear directorio para videos generados
+os.makedirs(VIDEOS_DIR, exist_ok=True)
 
 # Init Google Drive credentials if provided inline in env (JSON format only)
 def _init_inline_service_account_from_env():
@@ -282,6 +287,101 @@ def build_scale_pad(target: str) -> Optional[str]:
 def health():
     return {"ok": True}
 
+@app.get("/download/{video_uuid}")
+def download_video(video_uuid: str):
+    """Descargar video por UUID"""
+    try:
+        # Validar formato UUID
+        uuid.UUID(video_uuid)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="UUID inválido")
+    
+    filename = f"{video_uuid}.mp4"
+    file_path = os.path.join(VIDEOS_DIR, filename)
+    
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Video no encontrado")
+    
+    return FileResponse(
+        path=file_path,
+        media_type='video/mp4',
+        filename=filename,
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+@app.get("/videos")
+def list_videos(authorization: Optional[str] = Header(None)):
+    """Listar todos los videos disponibles (requiere autenticación)"""
+    check_auth(authorization)
+    
+    videos = []
+    try:
+        if os.path.exists(VIDEOS_DIR):
+            for filename in os.listdir(VIDEOS_DIR):
+                if filename.endswith('.mp4'):
+                    video_uuid = filename[:-4]  # Remover .mp4
+                    try:
+                        # Validar que es un UUID válido
+                        uuid.UUID(video_uuid)
+                        file_path = os.path.join(VIDEOS_DIR, filename)
+                        file_size = os.path.getsize(file_path)
+                        file_mtime = os.path.getmtime(file_path)
+                        
+                        videos.append({
+                            'uuid': video_uuid,
+                            'filename': filename,
+                            'size_bytes': file_size,
+                            'size_mb': round(file_size / (1024 * 1024), 2),
+                            'created_at': datetime.fromtimestamp(file_mtime).isoformat()
+                        })
+                    except ValueError:
+                        # Ignorar archivos que no tienen UUID válido como nombre
+                        continue
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error listando videos: {str(e)}")
+    
+    # Ordenar por fecha de creación (más recientes primero)
+    videos.sort(key=lambda x: x['created_at'], reverse=True)
+    
+    return {
+        "videos": videos,
+        "total_count": len(videos),
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/video/{video_uuid}/info")
+def get_video_info(video_uuid: str, authorization: Optional[str] = Header(None)):
+    """Obtener información detallada de un video específico (requiere autenticación)"""
+    check_auth(authorization)
+    
+    try:
+        # Validar formato UUID
+        uuid.UUID(video_uuid)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="UUID inválido")
+    
+    filename = f"{video_uuid}.mp4"
+    file_path = os.path.join(VIDEOS_DIR, filename)
+    
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Video no encontrado")
+    
+    try:
+        file_size = os.path.getsize(file_path)
+        file_mtime = os.path.getmtime(file_path)
+        
+        return {
+            "uuid": video_uuid,
+            "filename": filename,
+            "size_bytes": file_size,
+            "size_mb": round(file_size / (1024 * 1024), 2),
+            "created_at": datetime.fromtimestamp(file_mtime).isoformat(),
+            "download_url": f"/download/{video_uuid}",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error obteniendo información del video: {str(e)}")
+
 def _maybe_get_drive_service():
     """Obtiene el servicio de Google Drive priorizando credenciales JSON"""
     try:
@@ -326,62 +426,36 @@ def _maybe_get_drive_service():
         print(f"DEBUG: Error creating Google Drive service: {e}")
         return None
 
-def _upload_to_drive(file_path: str, filename: str, folder_id: Optional[str] = None):
-    """Sube un archivo a Google Drive y devuelve la URL compartible"""
+def _save_video_locally(video_data: bytes, base_url: str):
+    """Guarda un video localmente con un UUID como nombre y devuelve la URL de descarga"""
     try:
-        service = _maybe_get_drive_service()
-        if not service:
-            raise Exception("No se pudo inicializar el servicio de Google Drive")
+        # Generar UUID único para el archivo
+        video_uuid = str(uuid.uuid4())
+        filename = f"{video_uuid}.mp4"
+        file_path = os.path.join(VIDEOS_DIR, filename)
         
-        # Metadatos del archivo
-        file_metadata = {
-            'name': filename
-        }
+        # Guardar el video
+        print(f"DEBUG: Guardando video localmente como {filename}")
+        with open(file_path, 'wb') as f:
+            f.write(video_data)
         
-        # Si se especifica una carpeta, añadirla como parent
-        if folder_id:
-            file_metadata['parents'] = [folder_id]
+        file_size = os.path.getsize(file_path)
+        print(f"DEBUG: Video guardado exitosamente. Tamaño: {file_size} bytes")
         
-        # Crear el objeto de media
-        media = MediaFileUpload(file_path, mimetype='video/mp4', resumable=True)
-        
-        # Subir el archivo
-        print(f"DEBUG: Subiendo {filename} a Google Drive...")
-        file = service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields='id,name,webViewLink,webContentLink'
-        ).execute()
-        
-        # Hacer el archivo público para que sea accesible
-        permission = {
-            'type': 'anyone',
-            'role': 'reader'
-        }
-        service.permissions().create(
-            fileId=file.get('id'),
-            body=permission
-        ).execute()
-        
-        print(f"DEBUG: Archivo subido exitosamente. ID: {file.get('id')}")
-        
-        # Construir URL de descarga directa
-        file_id = file.get('id')
-        download_url = f"https://drive.google.com/file/d/{file_id}/view?usp=sharing"
-        direct_download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+        # Construir URL de descarga
+        download_url = f"{base_url}/download/{video_uuid}"
         
         return {
-            'file_id': file_id,
-            'filename': file.get('name'),
-            'view_url': download_url,
-            'download_url': direct_download_url,
-            'web_view_link': file.get('webViewLink'),
-            'web_content_link': file.get('webContentLink')
+            'video_uuid': video_uuid,
+            'filename': filename,
+            'download_url': download_url,
+            'file_size_bytes': file_size,
+            'file_size_mb': round(file_size / (1024 * 1024), 2)
         }
         
     except Exception as e:
-        print(f"DEBUG: Error subiendo archivo a Drive: {e}")
-        raise Exception(f"Error subiendo archivo a Google Drive: {str(e)}")
+        print(f"DEBUG: Error guardando video localmente: {e}")
+        raise Exception(f"Error guardando video localmente: {str(e)}")
 
 @app.get("/validate-credentials")
 def validate_credentials(authorization: Optional[str] = Header(None)):
@@ -492,6 +566,7 @@ def test_download(
 
 @app.post("/render")
 def render(
+    request: Request,
     authorization: Optional[str] = Header(None),
     # Solo URLs (fuentes obligatorias)
     video_url: str = Form(...),
@@ -715,39 +790,25 @@ def render(
             video_data = f.read()
         print(f"DEBUG: File read successfully, {len(video_data)} bytes in memory")
 
-    # En lugar de devolver el streaming, subir a Google Drive
+    # Guardar video localmente con UUID
     try:
-        # Crear archivo temporal para subir
-        with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_upload_file:
-            temp_upload_file.write(video_data)
-            temp_upload_path = temp_upload_file.name
+        # Construir URL base del servidor
+        base_url = f"{request.url.scheme}://{request.url.netloc}"
         
-        # Generar nombre único para el archivo
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"rendered_video_{timestamp}.mp4"
+        # Guardar video localmente
+        print(f"DEBUG: Guardando video generado localmente")
+        local_result = _save_video_locally(video_data, base_url)
         
-        print(f"DEBUG: Subiendo video generado a Google Drive como {filename}")
-        drive_result = _upload_to_drive(temp_upload_path, filename)
-        
-        # Limpiar archivo temporal de subida
-        os.remove(temp_upload_path)
-        
-        # Devolver información del archivo subido
+        # Devolver directamente la URL de descarga
+        print(f"DEBUG: Video guardado exitosamente. URL: {local_result['download_url']}")
         return JSONResponse({
-            "success": True,
-            "message": "Video generado y subido exitosamente a Google Drive",
-            "timestamp": datetime.now().isoformat(),
-            "file_info": drive_result,
-            "processing_stats": {
-                "video_size_bytes": len(video_data),
-                "video_size_mb": round(len(video_data) / (1024 * 1024), 2)
-            }
+            "download_url": local_result['download_url']
         })
         
-    except Exception as upload_error:
-        print(f"ERROR: Error subiendo a Drive: {upload_error}")
+    except Exception as save_error:
+        print(f"ERROR: Error guardando localmente: {save_error}")
         
-        # Si falla la subida, devolver el archivo como antes (fallback)
+        # Si falla el guardado, devolver el archivo como streaming (fallback)
         def iterfile():
             chunk_size = 1024 * 1024  # 1MB chunks
             for i in range(0, len(video_data), chunk_size):
