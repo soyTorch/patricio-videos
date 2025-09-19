@@ -287,9 +287,15 @@ def build_scale_pad(target: str) -> Optional[str]:
 def health():
     return {"ok": True}
 
-@app.get("/download/{video_uuid}")
-def download_video(video_uuid: str):
-    """Descargar video por UUID"""
+@app.get("/download/{video_filename}")
+def download_video(video_filename: str):
+    """Descargar video por UUID (con o sin extensión .mp4)"""
+    # Si el filename ya termina en .mp4, removerlo para obtener el UUID
+    if video_filename.endswith('.mp4'):
+        video_uuid = video_filename[:-4]
+    else:
+        video_uuid = video_filename
+    
     try:
         # Validar formato UUID
         uuid.UUID(video_uuid)
@@ -376,7 +382,7 @@ def get_video_info(video_uuid: str, authorization: Optional[str] = Header(None))
             "size_bytes": file_size,
             "size_mb": round(file_size / (1024 * 1024), 2),
             "created_at": datetime.fromtimestamp(file_mtime).isoformat(),
-            "download_url": f"/download/{video_uuid}",
+            "download_url": f"/download/{video_uuid}.mp4",
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
@@ -442,8 +448,8 @@ def _save_video_locally(video_data: bytes, base_url: str):
         file_size = os.path.getsize(file_path)
         print(f"DEBUG: Video guardado exitosamente. Tamaño: {file_size} bytes")
         
-        # Construir URL de descarga
-        download_url = f"{base_url}/download/{video_uuid}"
+        # Construir URL de descarga con extensión .mp4
+        download_url = f"{base_url}/download/{video_uuid}.mp4"
         
         return {
             'video_uuid': video_uuid,
